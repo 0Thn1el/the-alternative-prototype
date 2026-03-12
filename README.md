@@ -1,6 +1,6 @@
 # The Alternative - Fashion Stylist AI
 
-A modern fashion styling application with AI-powered recommendations, wardrobe management, and outfit builder.
+A modern fashion styling application with AI-powered recommendations, a wardrobe management, and N outfit builder.
 
 ## Features
 
@@ -8,7 +8,7 @@ A modern fashion styling application with AI-powered recommendations, wardrobe m
 - Image analysis for clothing items
 - Wardrobe management and organization
 - Outfit builder with style suggestions
-- WardrobeSync for seamless item management
+- Wardrobe syncing for seamless item management
 - Sustainability scoring for eco-conscious choices
 - Discovery feed for fashion inspiration
 

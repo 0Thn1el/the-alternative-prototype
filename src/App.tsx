@@ -10,8 +10,20 @@ import { Settings } from './components/Settings';
 import { Cart } from './components/Cart';
 import { Profile } from './components/Profile';
 import { Toaster } from "./components/ui/sonner";
+import SignIn from './components/auth/SignIn';
+import SignUp from './components/auth/SignUp';
+
+
+
+type User = {
+  email: string;
+  // add additional fields as needed
+};
 
 export default function App() {
+  const [user, setUser] = useState<User | null>(null);
+  const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
+
   const [currentPage, setCurrentPage] = useState('home');
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [fontSize, setFontSize] = useState('medium');
@@ -195,6 +207,8 @@ export default function App() {
     }
   };
 
+  
+
   const pageVariants = {
     initial: { 
       opacity: 0,
@@ -220,6 +234,25 @@ export default function App() {
     }
   };
 
+
+  if (!user) {
+    if (authMode === 'signin') {
+      return (
+        <SignIn
+          onSuccess={setUser}
+          onSwitchToSignUp={() => setAuthMode('signup')}
+        />
+      );
+    } else {
+      return (
+        <SignUp
+          onSuccess={setUser}
+          onSwitchToSignIn={() => setAuthMode('signin')}
+        />
+      );
+    }
+  }
+
   return (
     <div className="min-h-screen bg-background">
       <Sidebar currentPage={currentPage} setCurrentPage={setCurrentPage} cartCount={cart.length} />
@@ -242,3 +275,4 @@ export default function App() {
     </div>
   );
 }
+
