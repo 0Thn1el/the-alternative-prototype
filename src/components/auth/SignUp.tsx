@@ -12,9 +12,12 @@ import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import Stack from '@mui/material/Stack';
 import MuiCard from '@mui/material/Card';
+import Alert from '@mui/material/Alert';
 import { styled } from '@mui/material/styles';
 import AppTheme from '../shared-theme/AppTheme';
 import ColorModeSelect from '../shared-theme/ColorModeSelect';
+import { createUserWithEmailAndPassword } from 'firebase/auth';
+import { auth } from '../../services/firebase';
 
 const Card = styled(MuiCard)(({ theme }) => ({
   display: 'flex',
@@ -60,7 +63,6 @@ const SignUpContainer = styled(Stack)(({ theme }) => ({
 
 interface SignUpProps {
   disableCustomTheme?: boolean;
-  onSuccess?: (user: { email: string }) => void;
   onSwitchToSignIn?: () => void;
 }
 
@@ -71,6 +73,8 @@ export default function SignUp(props: SignUpProps) {
   const [passwordErrorMessage, setPasswordErrorMessage] = React.useState('');
   const [nameError, setNameError] = React.useState(false);
   const [nameErrorMessage, setNameErrorMessage] = React.useState('');
+  const [loading, setLoading] = React.useState(false);
+  const [firebaseError, setFirebaseError] = React.useState('');
 
   const validateInputs = () => {
     const email = document.getElementById('email') as HTMLInputElement;
@@ -109,20 +113,45 @@ export default function SignUp(props: SignUpProps) {
     return isValid;
   };
 
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
-    if (nameError || emailError || passwordError) {
-      event.preventDefault();
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    
+    if (!validateInputs()) {
       return;
     }
+
     const data = new FormData(event.currentTarget);
     const email = data.get('email') as string;
-    console.log({
-      name: data.get('name'),
-      lastName: data.get('lastName'),
-      email,
-      password: data.get('password'),
-    });
-    props.onSuccess?.({ email });
+    const password = data.get('password') as string;
+    const name = data.get('name') as string;
+
+    try {
+      setLoading(true);
+      setFirebaseError('');
+      
+      // Create Firebase user
+      const result = await createUserWithEmailAndPassword(auth, email, password);
+      
+      // Store user data in backend database
+      const token = await result.user.getIdToken();
+      await fetch('http://localhost:3001/api/users', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          displayName: name,
+          email,
+        }),
+      });
+      
+      // Authentication successful - useAuth hook will handle state update
+    } catch (error: any) {
+      setFirebaseError(error.message || 'Failed to sign up');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -138,6 +167,9 @@ export default function SignUp(props: SignUpProps) {
           >
             Sign up
           </Typography>
+          {firebaseError && (
+            <Alert severity="error">{firebaseError}</Alert>
+          )}
           <Box
             component="form"
             onSubmit={handleSubmit}
@@ -196,9 +228,9 @@ export default function SignUp(props: SignUpProps) {
               type="submit"
               fullWidth
               variant="contained"
-              onClick={validateInputs}
+              disabled={loading}
             >
-              Sign up
+              {loading ? 'Signing up...' : 'Sign up'}
             </Button>
           </Box>
           <Divider>

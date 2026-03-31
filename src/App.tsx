@@ -12,6 +12,7 @@ import { Profile } from './components/Profile';
 import { Toaster } from "./components/ui/sonner";
 import SignIn from './components/auth/SignIn';
 import SignUp from './components/auth/SignUp';
+import { useAuth } from './hooks/useAuth';
 
 
 
@@ -21,7 +22,7 @@ type User = {
 };
 
 export default function App() {
-  const [user, setUser] = useState<User | null>(null);
+  const { user, loading } = useAuth();
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
 
   const [currentPage, setCurrentPage] = useState('home');
@@ -235,18 +236,16 @@ export default function App() {
   };
 
 
-  if (!user) {
+  if (!user && !loading) {
     if (authMode === 'signin') {
       return (
         <SignIn
-          onSuccess={setUser}
           onSwitchToSignUp={() => setAuthMode('signup')}
         />
       );
     } else {
       return (
         <SignUp
-          onSuccess={setUser}
           onSwitchToSignIn={() => setAuthMode('signin')}
         />
       );

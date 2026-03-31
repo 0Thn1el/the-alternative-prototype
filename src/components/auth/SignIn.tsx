@@ -12,11 +12,14 @@ import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import Stack from '@mui/material/Stack';
 import MuiCard from '@mui/material/Card';
+import Alert from '@mui/material/Alert';
 import { styled } from '@mui/material/styles';
 import ForgotPassword from './components/ForgotPassword';
 import AppTheme from '../shared-theme/AppTheme';
 import ColorModeSelect from '../shared-theme/ColorModeSelect';
 import { GoogleIcon, FacebookIcon} from './components/CustomIcons';
+import { signInWithEmailAndPassword } from 'firebase/auth';
+import { auth } from '../../services/firebase';
 
 const Card = styled(MuiCard)(({ theme }) => ({
   display: 'flex',
@@ -62,7 +65,6 @@ const SignInContainer = styled(Stack)(({ theme }) => ({
 
 interface SignInProps {
   disableCustomTheme?: boolean;
-  onSuccess?: (user: { email: string }) => void;
   onSwitchToSignUp?: () => void;
 }
 
@@ -73,6 +75,8 @@ export default function SignIn(props: SignInProps) {
   const [passwordError, setPasswordError] = React.useState(false);
   const [passwordErrorMessage, setPasswordErrorMessage] = React.useState('');
   const [open, setOpen] = React.useState(false);
+  const [loading, setLoading] = React.useState(false);
+  const [firebaseError, setFirebaseError] = React.useState('');
 
   const handleClickOpen = () => {
     setOpen(true);
@@ -82,19 +86,30 @@ export default function SignIn(props: SignInProps) {
     setOpen(false);
   };
 
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
-    if (emailError || passwordError) {
-      event.preventDefault();
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    
+    if (!validateInputs()) {
       return;
     }
+
     const data = new FormData(event.currentTarget);
     const email = data.get('email') as string;
-    console.log({
-      email,
-      password: data.get('password'),
-    });
-    // fake success callback; replace with real API call later
-    props.onSuccess?.({ email });
+    const password = data.get('password') as string;
+
+    try {
+      setLoading(true);
+      setFirebaseError('');
+      
+      // Sign in with Firebase
+      await signInWithEmailAndPassword(auth, email, password);
+      
+      // Authentication successful - useAuth hook will handle state update
+    } catch (error: any) {
+      setFirebaseError(error.message || 'Failed to sign in');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const validateInputs = () => {
@@ -137,6 +152,9 @@ export default function SignIn(props: SignInProps) {
           >
             Sign in
           </Typography>
+          {firebaseError && (
+            <Alert severity="error">{firebaseError}</Alert>
+          )}
           <Box
             component="form"
             onSubmit={handleSubmit}
@@ -191,9 +209,9 @@ export default function SignIn(props: SignInProps) {
               type="submit"
               fullWidth
               variant="contained"
-              onClick={validateInputs}
+              disabled={loading}
             >
-              Sign in
+              {loading ? 'Signing in...' : 'Sign in'}
             </Button>
             <Link
               component="button"
