@@ -1,9 +1,18 @@
 import { Button } from "./ui/button";
 import { ImageWithFallback } from './errors/ImageWithFallback';
-import { Camera, Shirt, Package, Search, Home, Sparkles, User, ShoppingBag } from "lucide-react";
+import { Camera, Shirt, Package, Search, Home, Sparkles, User, ShoppingBag, LogOut } from "lucide-react";
 import { Badge } from "./ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
+import { useAuth } from '../hooks/useAuth';
 
 export function Navigation({ currentPage, setCurrentPage }) {
+  const { user, logout } = useAuth();
+
   const navItems = [
     { id: 'home', label: 'Shop', icon: Home },
     { id: 'analyze', label: 'Analyze', icon: Camera },
@@ -61,9 +70,23 @@ export function Navigation({ currentPage, setCurrentPage }) {
                 3
               </Badge>
             </Button>
-            <Button variant="ghost" size="sm">
-              <User className="w-5 h-5" />
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="sm">
+                  <User className="w-5 h-5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => setCurrentPage('profile')}>
+                  <User className="w-4 h-4 mr-2" />
+                  Profile
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={logout}>
+                  <LogOut className="w-4 h-4 mr-2" />
+                  Logout
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
 

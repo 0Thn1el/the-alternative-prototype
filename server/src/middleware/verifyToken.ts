@@ -21,15 +21,21 @@ export async function verifyToken(
   res: Response,
   next: NextFunction
 ): Promise<void> {
+  const authHeader = req.headers.authorization;
+  console.log('Auth header received:', authHeader ? authHeader.substring(0, 20) + '...' : 'none');
+  
   const token = req.headers.authorization?.split(' ')[1];
 
   if (!token) {
+    console.log('No token provided in request');
     res.status(401).json({ error: 'No token provided' });
     return;
   }
 
   try {
+    console.log('Verifying token...');
     const decoded = await admin.auth().verifyIdToken(token);
+    console.log('Token verified successfully for uid:', decoded.uid);
     req.uid = decoded.uid;
     req.email = decoded.email;
     next();

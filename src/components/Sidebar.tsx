@@ -4,7 +4,8 @@ import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Sheet, SheetContent, SheetTrigger } from "./ui/sheet";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu";
-import { Camera, Shirt, Package, Search, Home, User, ShoppingBag, Menu, Settings as SettingsIcon } from "lucide-react";
+import { Camera, Shirt, Package, Search, Home, User, ShoppingBag, Menu, Settings as SettingsIcon, LogOut, ChevronDown, ChevronUp } from "lucide-react";
+import { useAuth } from '../hooks/useAuth';
 
 interface SidebarProps {
   currentPage: string;
@@ -13,7 +14,9 @@ interface SidebarProps {
 }
 
 export function Sidebar({ currentPage, setCurrentPage, cartCount }: SidebarProps) {
+  const { logout } = useAuth();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const [isAccountExpanded, setIsAccountExpanded] = useState(false);
 
   const navItems = [
     { id: 'home', label: 'Shop', icon: Home },
@@ -110,16 +113,47 @@ export function Sidebar({ currentPage, setCurrentPage, cartCount }: SidebarProps
           </Button>
         </motion.div>
         
-        <motion.div whileHover={{ x: 6 }} whileTap={{ scale: 0.98 }}>
+        <div>
           <Button
-            variant={currentPage === 'profile' ? "default" : "ghost"}
-            onClick={() => handleNavigation('profile')}
+            variant="ghost"
+            onClick={() => setIsAccountExpanded(!isAccountExpanded)}
             className="w-full justify-start gap-4 transition-all duration-200 h-12 px-4 rounded-xl"
           >
             <User className="w-5 h-5" />
-            <span className="text-[15px]">Profile</span>
+            <span className="text-[15px]">Account</span>
+            {isAccountExpanded ? (
+              <ChevronUp className="w-4 h-4 ml-auto" />
+            ) : (
+              <ChevronDown className="w-4 h-4 ml-auto" />
+            )}
           </Button>
-        </motion.div>
+          
+          {isAccountExpanded && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="ml-4 mt-1 space-y-1"
+            >
+              <Button
+                variant={currentPage === 'profile' ? "default" : "ghost"}
+                onClick={() => handleNavigation('profile')}
+                className="w-full justify-start gap-3 transition-all duration-200 h-10 px-3 rounded-lg text-sm"
+              >
+                <User className="w-4 h-4" />
+                Profile
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={logout}
+                className="w-full justify-start gap-3 transition-all duration-200 h-10 px-3 rounded-lg text-sm text-red-600 hover:text-red-700 hover:bg-red-50"
+              >
+                <LogOut className="w-4 h-4" />
+                Logout
+              </Button>
+            </motion.div>
+          )}
+        </div>
 
         <motion.div whileHover={{ x: 6 }} whileTap={{ scale: 0.98 }}>
           <Button
@@ -174,13 +208,26 @@ export function Sidebar({ currentPage, setCurrentPage, cartCount }: SidebarProps
               </Badge>
             </Button>
 
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => handleNavigation('profile')}
-            >
-              <User className="w-5 h-5" />
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                >
+                  <User className="w-5 h-5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuItem onClick={() => handleNavigation('profile')}>
+                  <User className="w-4 h-4 mr-2" />
+                  Profile
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={logout}>
+                  <LogOut className="w-4 h-4 mr-2" />
+                  Logout
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
 
             <Sheet open={isMobileOpen} onOpenChange={setIsMobileOpen}>
               <SheetTrigger asChild>

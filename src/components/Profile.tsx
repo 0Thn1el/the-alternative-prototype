@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -7,31 +7,181 @@ import { Separator } from "./ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Avatar, AvatarFallback } from "./ui/avatar";
 import { Badge } from "./ui/badge";
-import { User, Mail, MapPin, Phone, CreditCard, Package, Heart, Award } from "lucide-react";
+import { User, Mail, MapPin, Phone, CreditCard, Package, Heart, Award, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { userAPI } from '../services/api';
+import { useAuth } from '../hooks/useAuth';
 
 export function Profile() {
+  const { user } = useAuth();
   const [profile, setProfile] = useState({
-    name: "Alex Morgan",
-    email: "alex.morgan@example.com",
-    phone: "+1 (555) 123-4567",
-    location: "San Francisco, CA",
-    joinDate: "January 2024"
+    name: "",
+    email: "",
+    phone: "",
+    location: "",
+    joinDate: ""
   });
-
   const [isEditing, setIsEditing] = useState(false);
   const [editedProfile, setEditedProfile] = useState(profile);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
-  const handleSave = () => {
-    setProfile(editedProfile);
-    setIsEditing(false);
-    toast.success("Profile updated successfully!");
+  useEffect(() => {
+    if (user) {
+      fetchUserProfile();
+    } else {
+      console.warn('Profile component rendered but user is not authenticated');
+      setLoading(false);
+    }
+  }, [user]);
+
+  const fetchUserProfile = async () => {
+    if (!user) return;
+    
+    try {
+      setLoading(true);
+      const response = await userAPI.getMe();
+      const userData = response.data;
+      
+      const profileData = {
+        name: userData.displayName || user?.displayName || "",
+        email: userData.email || user?.email || "",
+        phone: "",
+        location: "",
+        joinDate: userData.createdAt ? new Date(userData.createdAt).toLocaleDateString('en-US', { 
+          year: 'numeric', 
+          month: 'long' 
+        }) : ""
+      };
+      
+      setProfile(profileData);
+      setEditedProfile(profileData);
+    } catch (error: any) {
+      console.error('Failed to fetch user profile:', error);
+      
+      // If user not found in database, create the user record
+      if (error.response?.status === 404 && user) {
+        try {
+          await userAPI.updateProfile({
+            displayName: user.displayName || "",
+            email: user.email || ""
+          });
+          
+          // Retry fetching after creation
+          const response = await userAPI.getMe();
+          const userData = response.data;
+          
+          const profileData = {
+            name: userData.displayName || user?.displayName || "",
+            email: userData.email || user?.email || "",
+            phone: "",
+            location: "",
+            joinDate: userData.createdAt ? new Date(userData.createdAt).toLocaleDateString('en-US', { 
+              year: 'numeric', 
+              month: 'long' 
+            }) : ""
+          };
+          
+          setProfile(profileData);
+          setEditedProfile(profileData);
+        } catch (createError) {
+          console.error('Failed to create user profile:', createError);
+          // Fallback to Firebase user data
+          const profileData = {
+            name: user?.displayName || "",
+            email: user?.email || "",
+            phone: "",
+            location: "",
+            joinDate: ""
+          };
+          setProfile(profileData);
+          setEditedProfile(profileData);
+          toast.error("Failed to load profile data");
+        }
+      } else {
+        // Fallback to Firebase user data if API fails
+        const profileData = {
+          name: user?.displayName || "",
+          email: user?.email || "",
+          phone: "",
+          location: "",
+          joinDate: ""
+        };
+        setProfile(profileData);
+        setEditedProfile(profileData);
+        toast.error("Failed to load profile data from server");
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSave = async () => {
+    try {
+      setSaving(true);
+      console.log('Starting profile update...');
+      console.log('Current user:', user);
+      console.log('Edited profile:', editedProfile);
+      
+      if (!user) {
+        throw new Error('User not authenticated. Please log in again.');
+      }
+
+      // Check if user has a valid auth token
+      try {
+        await user.getIdToken(true); // Force refresh token
+        console.log('User token is valid');
+      } catch (tokenError) {
+        console.error('Token validation failed:', tokenError);
+        throw new Error('Authentication session expired. Please log in again.');
+      }
+      
+      console.log('Updating profile with:', {
+        displayName: editedProfile.name,
+        email: editedProfile.email
+      });
+      
+      const response = await userAPI.updateProfile({
+        displayName: editedProfile.name,
+        email: editedProfile.email
+      });
+      
+      console.log('Profile update response:', response);
+      
+      setProfile(editedProfile);
+      setIsEditing(false);
+      toast.success("Profile updated successfully!");
+    } catch (error: any) {
+      console.error('Failed to update profile:', error);
+      console.error('Error details:', {
+        message: error.message,
+        response: error.response,
+        status: error.response?.status,
+        data: error.response?.data
+      });
+      
+      const errorMessage = error.response?.data?.error || error.message || 'Network error occurred';
+      toast.error(`Failed to update profile: ${errorMessage}`);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleCancel = () => {
     setEditedProfile(profile);
     setIsEditing(false);
   };
+
+  if (loading) {
+    return (
+      <div className="container mx-auto px-6 py-8">
+        <div className="flex items-center justify-center min-h-[400px]">
+          <Loader2 className="w-8 h-8 animate-spin" />
+          <span className="ml-2">Loading profile...</span>
+        </div>
+      </div>
+    );
+  }
 
   const sustainabilityStats = {
     itemsSaved: 45,
@@ -84,7 +234,8 @@ export function Profile() {
           <div className="flex items-center gap-4">
             <Avatar className="w-20 h-20">
               <AvatarFallback className="text-2xl">
-                {profile.name.split(' ').map(n => n[0]).join('')}
+                {profile.name ? profile.name.split(' ').map(n => n[0]).join('').toUpperCase() : 
+                 user?.email?.[0]?.toUpperCase() || 'U'}
               </AvatarFallback>
             </Avatar>
             <div>
@@ -113,8 +264,11 @@ export function Profile() {
                 <Button onClick={() => setIsEditing(true)}>Edit Profile</Button>
               ) : (
                 <div className="flex gap-2">
-                  <Button variant="outline" onClick={handleCancel}>Cancel</Button>
-                  <Button onClick={handleSave}>Save Changes</Button>
+                  <Button variant="outline" onClick={handleCancel} disabled={saving}>Cancel</Button>
+                  <Button onClick={handleSave} disabled={saving}>
+                    {saving && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                    {saving ? "Saving..." : "Save Changes"}
+                  </Button>
                 </div>
               )}
             </CardHeader>
