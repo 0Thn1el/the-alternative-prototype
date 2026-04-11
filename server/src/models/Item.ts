@@ -7,6 +7,7 @@ export interface IItem extends Document {
   color?: string;
   material?: string;
   imageUrl?: string;
+  imageEmbedding?: number[]; // CLIP embedding vector for image search
   createdAt: Date;
   updatedAt: Date;
 }
@@ -19,6 +20,7 @@ const itemSchema = new Schema<IItem>(
     color: { type: String },
     material: { type: String },
     imageUrl: { type: String },
+    imageEmbedding: { type: [Number], index: true }, // Indexed for efficient vector search
   },
   { timestamps: true }
 );

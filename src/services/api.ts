@@ -76,6 +76,12 @@ export const itemsAPI = {
     const axiosInstance = await createAuthenticatedAxios();
     return axiosInstance.post('/items', data);
   },
+  createWithImage: async (formData: FormData) => {
+    const axiosInstance = await createAuthenticatedAxios();
+    return axiosInstance.post('/items', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+  },
   update: async (id: string, data: any) => {
     const axiosInstance = await createAuthenticatedAxios();
     return axiosInstance.put(`/items/${id}`, data);
@@ -83,6 +89,14 @@ export const itemsAPI = {
   delete: async (id: string) => {
     const axiosInstance = await createAuthenticatedAxios();
     return axiosInstance.delete(`/items/${id}`);
+  },
+  searchByImage: async (imageFile: File) => {
+    const axiosInstance = await createAuthenticatedAxios();
+    const formData = new FormData();
+    formData.append('image', imageFile);
+    return axiosInstance.post('/items/search-image', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
   },
 };
 
