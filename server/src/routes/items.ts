@@ -3,6 +3,7 @@ import { AuthRequest, verifyToken } from '../middleware/verifyToken';
 import Item from '../models/Item';
 import multer from 'multer';
 import { extractImageEmbedding, findSimilarItems, updateItemEmbedding } from '../services/clipImageSearch';
+import { uploadBufferToCloudinary } from '../config/cloudinary';
 
 const router: Router = express.Router();
 
@@ -31,8 +32,19 @@ router.post('/', verifyToken, upload.single('image'), async (req: AuthRequest, r
   try {
     const itemData = { ...req.body, uid: req.uid };
 
-    // If an image was uploaded, process it for embedding
     if (req.file) {
+      // Step 1: Upload image buffer to Cloudinary → get permanent URL
+      try {
+        console.log('Uploading image to Cloudinary...');
+        const imageUrl = await uploadBufferToCloudinary(req.file.buffer);
+        itemData.imageUrl = imageUrl;
+        console.log('Cloudinary upload successful:', imageUrl);
+      } catch (uploadError) {
+        console.error('Cloudinary upload failed:', uploadError);
+        return res.status(500).json({ error: 'Image upload to Cloudinary failed' });
+      }
+
+      // Step 2: Generate CLIP embedding from the same buffer
       try {
         console.log('Processing uploaded image for CLIP embedding...');
         const embedding = await extractImageEmbedding(req.file.buffer);
@@ -40,7 +52,7 @@ router.post('/', verifyToken, upload.single('image'), async (req: AuthRequest, r
         console.log('CLIP embedding generated successfully');
       } catch (embeddingError) {
         console.warn('Failed to generate CLIP embedding, continuing without it:', embeddingError);
-        // Continue without embedding - don't fail the entire request
+        // Don't fail — embedding is optional
       }
     }
 

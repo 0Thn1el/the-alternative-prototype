@@ -1,30 +1,46 @@
-import { AutoProcessor, CLIPVisionModelWithProjection, RawImage, env } from '@xenova/transformers';
-import sharp from 'sharp';
 import Item from '../models/Item';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
 // Cache CLIP model/processor after first load
-env.cacheDir = path.join(os.homedir(), '.cache', 'transformers');
 let processor: any = null;
 let visionModel: any = null;
+let rawImageReader: any = null;
+let sharpLoader: any = null;
+
+async function getSharp() {
+  if (!sharpLoader) {
+    const sharpModule = await import('sharp');
+    sharpLoader = sharpModule.default;
+  }
+  return sharpLoader;
+}
+
+async function loadTransformers() {
+  const transformers = await import('@xenova/transformers');
+  transformers.env.cacheDir = path.join(os.homedir(), '.cache', 'transformers');
+  return transformers;
+}
 
 async function getCLIPModel() {
   if (!processor || !visionModel) {
     console.log('Loading CLIP model (this may take a moment on first run)...');
+    const { AutoProcessor, CLIPVisionModelWithProjection, RawImage } = await loadTransformers();
     const model_id = 'Xenova/clip-vit-base-patch32';
     processor = await AutoProcessor.from_pretrained(model_id);
     visionModel = await CLIPVisionModelWithProjection.from_pretrained(model_id);
+    rawImageReader = RawImage;
     console.log('CLIP model loaded successfully');
   }
-  return { processor, visionModel };
+  return { processor, visionModel, RawImage: rawImageReader };
 }
 
 export async function extractImageEmbedding(imageBuffer: Buffer): Promise<number[]> {
   // Try CLIP first for semantic image embeddings
   try {
-    const { processor: proc, visionModel: model } = await getCLIPModel();
+    const { processor: proc, visionModel: model, RawImage } = await getCLIPModel();
+    const sharp = await getSharp();
 
     // Write buffer to a temp file so RawImage can read it
     const tmpPath = path.join(os.tmpdir(), `clip-tmp-${Date.now()}.jpg`);
@@ -52,34 +68,40 @@ export async function extractImageEmbedding(imageBuffer: Buffer): Promise<number
 
 // Fallback: extract basic color/shape features using Sharp
 async function extractSharpFeatures(imageBuffer: Buffer): Promise<number[]> {
-  const image = sharp(imageBuffer);
-  const metadata = await image.metadata();
-  const stats = await image.stats();
+  try {
+    const sharp = await getSharp();
+    const image = sharp(imageBuffer);
+    const metadata = await image.metadata();
+    const stats = await image.stats();
 
-  const { dominant } = stats;
-  const channels = stats.channels;
+    const { dominant } = stats;
+    const channels = stats.channels;
 
-  const features = [
-    metadata.width! / 1000,
-    metadata.height! / 1000,
-    dominant.r / 255,
-    dominant.g / 255,
-    dominant.b / 255,
-    channels[0].mean / 255,
-    channels[1].mean / 255,
-    channels[2].mean / 255,
-    (channels[0].max - channels[0].min) / 255,
-    (channels[1].max - channels[1].min) / 255,
-    (channels[2].max - channels[2].min) / 255,
-    metadata.width! / metadata.height!,
-  ];
+    const features = [
+      metadata.width! / 1000,
+      metadata.height! / 1000,
+      dominant.r / 255,
+      dominant.g / 255,
+      dominant.b / 255,
+      channels[0].mean / 255,
+      channels[1].mean / 255,
+      channels[2].mean / 255,
+      (channels[0].max - channels[0].min) / 255,
+      (channels[1].max - channels[1].min) / 255,
+      (channels[2].max - channels[2].min) / 255,
+      metadata.width! / metadata.height!,
+    ];
 
-  while (features.length < 512) {
-    features.push(0);
+    while (features.length < 512) {
+      features.push(0);
+    }
+
+    console.log('Sharp fallback features extracted:', features.length, 'dimensions');
+    return features;
+  } catch (sharpError) {
+    console.warn('Sharp features unavailable, returning zero embedding:', sharpError);
+    return new Array(512).fill(0);
   }
-
-  console.log('Sharp fallback features extracted:', features.length, 'dimensions');
-  return features;
 }
 
 // Find similar items using cosine similarity search

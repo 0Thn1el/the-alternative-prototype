@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
@@ -12,12 +12,22 @@ import { Textarea } from "./ui/textarea";
 import { ImageWithFallback } from './errors/ImageWithFallback';
 import { 
   Package, Plus, Trash2, Edit3, CheckCircle, XCircle, Shirt, Filter, Tag, 
-  Folders, Grid3X3, List, Heart, Star, ShoppingBag, Eye, Sparkles, LayoutGrid 
+  Folders, Grid3X3, List, Heart, Star, ShoppingBag, Eye, Sparkles, LayoutGrid,
+  Upload, X, ImageIcon
 } from "lucide-react";
+import { itemsAPI } from '../services/api';
 import { Alert, AlertDescription } from "./ui/alert";
+
+function getImageUrlFromResponse(data: any): string {
+  if (typeof data?.imageUrl === 'string' && data.imageUrl.trim()) return data.imageUrl;
+  if (typeof data?.image === 'string' && data.image.trim()) return data.image;
+  if (typeof data?.image?.url === 'string' && data.image.url.trim()) return data.image.url;
+  return '';
+}
 
 interface ClothingItem {
   id: number;
+  mongoId?: string; // MongoDB _id for persistence
   item: string;
   type: string;
   color: string;
@@ -49,6 +59,11 @@ interface EnhancedWardrobeProps {
 
 export function EnhancedWardrobe({ wardrobe, setWardrobe, wardrobes, setWardrobes, analyzedItem }: EnhancedWardrobeProps) {
   const [showAddDialog, setShowAddDialog] = useState(false);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [showDetailDialog, setShowDetailDialog] = useState(false);
   const [selectedItem, setSelectedItem] = useState<ClothingItem | null>(null);
   const [editingItem, setEditingItem] = useState<ClothingItem | null>(null);
@@ -101,32 +116,86 @@ export function EnhancedWardrobe({ wardrobe, setWardrobe, wardrobes, setWardrobe
   };
 
   // Item management
-  const addItemToWardrobe = () => {
-    if (newItem.item?.trim()) {
-      const item: ClothingItem = {
-        id: Date.now(),
-        item: newItem.item!,
-        type: newItem.type || '',
-        color: newItem.color || '',
-        style: newItem.style || '',
-        image: newItem.image || 'https://images.unsplash.com/photo-1523381210434-271e8be1f52b?w=300&h=400&fit=crop',
-        customTags: newItem.customTags || [],
-        brand: newItem.brand || '',
-        price: newItem.price || 0,
-        fabric: newItem.fabric || '',
-        description: newItem.description || '',
-        isOwned: newItem.isOwned ?? true,
-        isFavorite: newItem.isFavorite ?? false,
-        materials: [],
-        sustainable: { organic: false, recycled: false, local: false }
-      };
-      setWardrobe([...wardrobe, item]);
-      setNewItem({
-        item: '', type: '', color: '', style: '', image: '', customTags: [], 
-        brand: '', price: 0, fabric: '', description: '', isOwned: true, isFavorite: false
-      });
-      setShowAddDialog(false);
+  const handleImageSelect = useCallback((file: File) => {
+    if (!file.type.startsWith('image/')) return;
+    setImageFile(file);
+    setUploadError(null);
+    const objectUrl = URL.createObjectURL(file);
+    setImagePreviewUrl(objectUrl);
+  }, []);
+
+  const clearImage = useCallback(() => {
+    if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+    setImageFile(null);
+    setImagePreviewUrl(null);
+    setUploadError(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  }, [imagePreviewUrl]);
+
+  const addItemToWardrobe = async () => {
+    if (!newItem.item?.trim()) return;
+    setIsUploading(true);
+    setUploadError(null);
+
+    let resolvedImageUrl = newItem.image || '';
+    let resolvedMongoId: string | undefined;
+
+    try {
+      if (imageFile) {
+        // Upload to backend → Cloudinary → MongoDB
+        const formData = new FormData();
+        formData.append('image', imageFile);
+        formData.append('name', newItem.item!);
+        formData.append('category', newItem.type || 'unknown');
+        if (newItem.color) formData.append('color', newItem.color);
+        if (newItem.fabric) formData.append('material', newItem.fabric);
+
+        const response = await itemsAPI.createWithImage(formData);
+        resolvedImageUrl = getImageUrlFromResponse(response.data) || resolvedImageUrl;
+        resolvedMongoId = response.data._id;
+      } else {
+        // No image — still save metadata to MongoDB so it persists
+        const response = await itemsAPI.create({
+          name: newItem.item!,
+          category: newItem.type || 'unknown',
+          color: newItem.color,
+          material: newItem.fabric,
+          imageUrl: newItem.image || undefined,
+        });
+        resolvedMongoId = response.data._id;
+      }
+    } catch (err: any) {
+      console.error('Save to MongoDB failed:', err);
+      setUploadError(err?.response?.data?.error || 'Could not save to server. Item added locally only.');
+    } finally {
+      setIsUploading(false);
     }
+
+    const item: ClothingItem = {
+      id: Date.now(),
+      mongoId: resolvedMongoId,
+      item: newItem.item!,
+      type: newItem.type || '',
+      color: newItem.color || '',
+      style: newItem.style || '',
+      image: resolvedImageUrl || imagePreviewUrl || 'https://images.unsplash.com/photo-1523381210434-271e8be1f52b?w=300&h=400&fit=crop',
+      customTags: newItem.customTags || [],
+      brand: newItem.brand || '',
+      price: newItem.price || 0,
+      fabric: newItem.fabric || '',
+      description: newItem.description || '',
+      isOwned: newItem.isOwned ?? true,
+      isFavorite: newItem.isFavorite ?? false,
+      materials: [],
+      sustainable: { organic: false, recycled: false, local: false }
+    };
+    setWardrobe([...wardrobe, item]);
+    setNewItem({
+      item: '', type: '', color: '', style: '', image: '', customTags: [], 
+      brand: '', price: 0, fabric: '', description: '', isOwned: true, isFavorite: false
+    });
+    clearImage();
+    setShowAddDialog(false);
   };
 
   const toggleFavorite = (id: number) => {
@@ -141,8 +210,16 @@ export function EnhancedWardrobe({ wardrobe, setWardrobe, wardrobes, setWardrobe
     ));
   };
 
-  const removeItemFromWardrobe = (id: number) => {
-    setWardrobe(wardrobe.filter(item => item.id !== id));
+  const removeItemFromWardrobe = async (id: number) => {
+    const item = wardrobe.find(i => i.id === id);
+    if (item?.mongoId) {
+      try {
+        await itemsAPI.delete(item.mongoId);
+      } catch (err) {
+        console.warn('Failed to delete from MongoDB, removing locally only:', err);
+      }
+    }
+    setWardrobe(wardrobe.filter(i => i.id !== id));
   };
 
   const addTagToItem = (itemId: number, tag: string) => {
@@ -349,13 +426,61 @@ export function EnhancedWardrobe({ wardrobe, setWardrobe, wardrobes, setWardrobe
                         />
                       </div>
                       <div>
-                        <Label htmlFor="item-image">Image URL</Label>
-                        <Input
-                          id="item-image"
-                          value={newItem.image || ''}
-                          onChange={(e) => setNewItem({...newItem, image: e.target.value})}
-                          placeholder="https://example.com/image.jpg"
+                        <Label>Photo</Label>
+                        <div
+                          className="mt-1 border-2 border-dashed rounded-lg cursor-pointer hover:border-primary transition-colors"
+                          onClick={() => fileInputRef.current?.click()}
+                          onDragOver={(e) => e.preventDefault()}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            const file = e.dataTransfer.files[0];
+                            if (file) handleImageSelect(file);
+                          }}
+                        >
+                          {imagePreviewUrl ? (
+                            <div className="relative">
+                              <img
+                                src={imagePreviewUrl}
+                                alt="Preview"
+                                className="w-full h-36 object-cover rounded-lg"
+                              />
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); clearImage(); }}
+                                className="absolute top-1 right-1 bg-black/60 hover:bg-black/80 text-white rounded-full p-0.5"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex flex-col items-center justify-center gap-2 py-6 text-muted-foreground">
+                              <ImageIcon className="w-8 h-8" />
+                              <span className="text-sm">Drop image here or click to browse</span>
+                              <span className="text-xs">PNG, JPG, WebP up to 10 MB</span>
+                            </div>
+                          )}
+                        </div>
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) handleImageSelect(file);
+                          }}
                         />
+                        {!imagePreviewUrl && (
+                          <Input
+                            className="mt-2"
+                            value={newItem.image || ''}
+                            onChange={(e) => setNewItem({...newItem, image: e.target.value})}
+                            placeholder="Or paste an image URL"
+                          />
+                        )}
+                        {uploadError && (
+                          <p className="text-xs text-destructive mt-1">{uploadError}</p>
+                        )}
                       </div>
                       <div>
                         <Label htmlFor="item-description">Description</Label>
@@ -389,8 +514,13 @@ export function EnhancedWardrobe({ wardrobe, setWardrobe, wardrobes, setWardrobe
                       </div>
                     </div>
                   </div>
-                  <Button onClick={addItemToWardrobe} className="w-full mt-4">
-                    Add to Wardrobe
+                  <Button onClick={addItemToWardrobe} disabled={isUploading} className="w-full mt-4">
+                    {isUploading ? (
+                      <span className="flex items-center gap-2">
+                        <Upload className="w-4 h-4 animate-bounce" />
+                        Uploading...
+                      </span>
+                    ) : 'Add to Wardrobe'}
                   </Button>
                 </DialogContent>
               </Dialog>

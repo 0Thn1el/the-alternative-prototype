@@ -7,6 +7,7 @@ import dotenv from 'dotenv';
 import wardrobeRoutes from './routes/wardrobe';
 import itemRoutes from './routes/items';
 import usersRoutes from './routes/users';
+import cloudinary from './config/cloudinary';
 
 dotenv.config();
 
@@ -32,6 +33,15 @@ app.use('/api/users', usersRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'Server is running' });
+});
+
+app.get('/test-cloudinary', async (req, res) => {
+  try {
+    const result = await cloudinary.api.ping();
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: 'Cloudinary connection failed', details: String(error) });
+  }
 });
 
 app.listen(port, () => {

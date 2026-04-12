@@ -13,6 +13,7 @@ import { Toaster } from "./components/ui/sonner";
 import SignIn from './components/auth/SignIn';
 import SignUp from './components/auth/SignUp';
 import { useAuth } from './hooks/useAuth';
+import { itemsAPI } from './services/api';
 
 
 
@@ -21,6 +22,13 @@ type User = {
   // add additional fields as needed
 };
 
+function getImageUrlFromDoc(doc: any): string {
+  if (typeof doc?.imageUrl === 'string' && doc.imageUrl.trim()) return doc.imageUrl;
+  if (typeof doc?.image === 'string' && doc.image.trim()) return doc.image;
+  if (typeof doc?.image?.url === 'string' && doc.image.url.trim()) return doc.image.url;
+  return 'https://images.unsplash.com/photo-1523381210434-271e8be1f52b?w=300&h=400&fit=crop';
+}
+
 export default function App() {
   const { user, loading } = useAuth();
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
@@ -28,98 +36,7 @@ export default function App() {
   const [currentPage, setCurrentPage] = useState('home');
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [fontSize, setFontSize] = useState('medium');
-  const [wardrobe, setWardrobe] = useState([
-    { 
-      id: 1, 
-      item: "Organic Cotton Hoodie", 
-      type: "Top", 
-      color: "Grey", 
-      style: "Casual",
-      image: "https://images.unsplash.com/photo-1556821840-3a63f95609a7?w=300&h=400&fit=crop",
-      customTags: ["comfortable", "everyday"],
-      sustainable: { organic: true, recycled: false, local: true },
-      materials: ["Organic Cotton"],
-      brand: "Patagonia",
-      price: 85,
-      fabric: "100% Organic Cotton",
-      isOwned: true,
-      isFavorite: false,
-      description: "Comfortable everyday hoodie made from organic cotton",
-      sustainabilityScore: 85
-    },
-    { 
-      id: 2, 
-      item: "Classic Blue Denim Jeans", 
-      type: "Bottom", 
-      color: "Blue", 
-      style: "Casual",
-      image: "https://images.unsplash.com/photo-1542272604-787c3835535d?w=300&h=400&fit=crop",
-      customTags: ["versatile", "classic"],
-      sustainable: { organic: true, recycled: false, local: true },
-      materials: ["Organic Denim"],
-      brand: "Everlane",
-      price: 120,
-      fabric: "100% Organic Denim",
-      isOwned: true,
-      isFavorite: true,
-      description: "Classic fit jeans made from locally sourced organic denim",
-      sustainabilityScore: 85
-    },
-    { 
-      id: 3, 
-      item: "Wool Runner Sneakers", 
-      type: "Shoes", 
-      color: "White", 
-      style: "Casual",
-      image: "https://images.unsplash.com/photo-1549298916-b41d501d3772?w=300&h=400&fit=crop",
-      customTags: ["comfortable", "daily"],
-      sustainable: { organic: false, recycled: true, local: false },
-      materials: ["Merino Wool", "Recycled Materials"],
-      brand: "Allbirds",
-      price: 95,
-      fabric: "Merino Wool & Recycled Materials",
-      isOwned: true,
-      isFavorite: false,
-      description: "Sustainable sneakers made from natural materials",
-      sustainabilityScore: 82
-    },
-    { 
-      id: 4, 
-      item: "Organic Cotton Flannel Shirt", 
-      type: "Top", 
-      color: "Red", 
-      style: "Casual",
-      image: "https://images.unsplash.com/photo-1596755094514-f87e34085b2c?w=300&h=400&fit=crop",
-      customTags: ["cozy", "autumn"],
-      sustainable: { organic: true, recycled: false, local: true },
-      materials: ["Organic Cotton Flannel"],
-      brand: "Patagonia",
-      price: 78,
-      fabric: "100% Organic Cotton Flannel",
-      isOwned: false,
-      isFavorite: true,
-      description: "Cozy flannel shirt perfect for autumn weather",
-      sustainabilityScore: 80
-    },
-    { 
-      id: 5, 
-      item: "Sustainable Chino Pants", 
-      type: "Bottom", 
-      color: "Beige", 
-      style: "Smart Casual",
-      image: "https://images.unsplash.com/photo-1473966968600-fa801b869a1a?w=300&h=400&fit=crop",
-      customTags: ["smart", "professional"],
-      sustainable: { organic: true, recycled: true, local: false },
-      materials: ["Organic Cotton", "Recycled Polyester"],
-      brand: "Reformation",
-      price: 89,
-      fabric: "Organic Cotton & Recycled Polyester Blend",
-      isOwned: true,
-      isFavorite: false,
-      description: "Versatile chinos perfect for professional settings",
-      sustainabilityScore: 90
-    }
-  ]);
+  const [wardrobe, setWardrobe] = useState<any[]>([]);
   
   const [cart, setCart] = useState([
     {
@@ -173,6 +90,36 @@ export default function App() {
       document.documentElement.classList.remove('dark');
     }
   }, [isDarkMode]);
+
+  // Load wardrobe from MongoDB when user signs in
+  useEffect(() => {
+    if (!user) return;
+    itemsAPI.getAll()
+      .then((res) => {
+        const items = (res.data as any[]).map((doc: any) => ({
+          id: Date.now() + Math.random(), // local numeric id
+          mongoId: doc._id,
+          item: doc.name,
+          type: doc.category,
+          color: doc.color || '',
+          style: '',
+          image: getImageUrlFromDoc(doc),
+          fabric: doc.material || '',
+          customTags: [],
+          brand: '',
+          price: 0,
+          description: '',
+          isOwned: true,
+          isFavorite: false,
+          materials: [],
+          sustainable: { organic: false, recycled: false, local: false },
+        }));
+        setWardrobe(items);
+      })
+      .catch((err) => {
+        console.warn('Could not load wardrobe from server:', err);
+      });
+  }, [user]);
 
   const renderPage = () => {
     switch (currentPage) {
