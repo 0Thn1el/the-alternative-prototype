@@ -1,9 +1,13 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IItem extends Document {
-  uid: string;
+  uid?: string | null;
+  source: 'user' | 'deepfashion';
   name: string;
   category: string;
+  tags: string[];
+  price?: number;
+  brand?: string;
   color?: string;
   material?: string;
   imageUrl?: string;
@@ -14,9 +18,13 @@ export interface IItem extends Document {
 
 const itemSchema = new Schema<IItem>(
   {
-    uid: { type: String, required: true },
+    uid: { type: String, required: false, default: null, index: true },
+    source: { type: String, enum: ['user', 'deepfashion'], default: 'user', index: true },
     name: { type: String, required: true },
     category: { type: String, required: true },
+    tags: { type: [String], default: [], index: true },
+    price: { type: Number },
+    brand: { type: String },
     color: { type: String },
     material: { type: String },
     imageUrl: { type: String },

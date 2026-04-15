@@ -7,7 +7,8 @@
     "dev": "nodemon --exec ts-node src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "test-clip": "ts-node src/test-clip.ts"
+    "test-clip": "ts-node src/test-clip.ts",
+    "import-deepfashion": "ts-node src/scripts/importDeepFashion.ts"
   },
   "keywords": [],
   "author": "",

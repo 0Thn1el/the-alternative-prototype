@@ -98,6 +98,25 @@ export const itemsAPI = {
       headers: { 'Content-Type': 'multipart/form-data' }
     });
   },
+  getCatalog: async (params?: {
+    page?: number;
+    limit?: number;
+    q?: string;
+    category?: string;
+    tag?: string;
+    minPrice?: number;
+    maxPrice?: number;
+  }) => {
+    const axiosInstance = await createAuthenticatedAxios();
+    return axiosInstance.get('/items/catalog', { params });
+  },
+  getSimilarCatalogItems: async (
+    itemId: string,
+    params?: { page?: number; limit?: number }
+  ) => {
+    const axiosInstance = await createAuthenticatedAxios();
+    return axiosInstance.get(`/items/catalog/similar/${itemId}`, { params });
+  },
 };
 
 // User API

@@ -1,482 +1,351 @@
-import { useState } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
-import { Button } from "./ui/button";
-import { Badge } from "./ui/badge";
-import { Input } from "./ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
+import { useEffect, useMemo, useState } from 'react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
+import { Button } from './ui/button';
+import { Badge } from './ui/badge';
+import { Input } from './ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { ImageWithFallback } from './errors/ImageWithFallback';
-import { Search, ShoppingCart, ExternalLink, Leaf, Star, DollarSign, Heart, ArrowLeftRight, Filter } from "lucide-react";
-import { Alert, AlertDescription } from "./ui/alert";
-import { calculateSustainabilityScore, getSustainabilityBgColor, getSustainabilityGrade } from '../utils/sustainabilityScore';
+import { Search, ShoppingCart, ArrowLeftRight, Filter, ChevronLeft, ChevronRight, Sparkles } from 'lucide-react';
+import { Alert, AlertDescription } from './ui/alert';
+import { itemsAPI } from '../services/api';
 
-export function Discovery({ wardrobe, analyzedItem }) {
-  const [searchQuery, setSearchQuery] = useState("");
-  const [priceFilter, setPriceFilter] = useState("all");
-  const [sustainabilityFilter, setSustainabilityFilter] = useState("all");
-  const [favoriteItems, setFavoriteItems] = useState([]);
-  const [compareItems, setCompareItems] = useState([]);
+type CatalogItem = {
+  _id: string;
+  name: string;
+  category: string;
+  tags?: string[];
+  price?: number;
+  brand?: string;
+  imageUrl?: string;
+  similarity?: number;
+};
 
-  // Mock recommendation data with real brands
-  const recommended_items = [
-    {
-      id: 1,
-      name: "Recycled Cashmere Sweater",
-      brand: "Everlane",
-      price: 98,
-      originalPrice: 145,
-      rating: 4.8,
-      reviews: 1245,
-      sustainable: { organic: false, recycled: true, local: true },
-      image: "https://images.unsplash.com/photo-1620799140408-edc6dcb6d633?w=300&h=400&fit=crop",
-      category: "Top",
-      description: "Luxuriously soft cashmere made from recycled materials",
-      stores: ["Everlane", "Nordstrom", "Shopbop"],
-      reason: "Matches your sustainable style preferences"
-    },
-    {
-      id: 2,
-      name: "Recycled Denim Trucker Jacket",
-      brand: "Patagonia",
-      price: 149,
-      originalPrice: 179,
-      rating: 4.6,
-      reviews: 890,
-      sustainable: { organic: false, recycled: true, local: true },
-      image: "https://images.unsplash.com/photo-1716231683024-c85536c2dd52?w=300&h=400&fit=crop",
-      category: "Outerwear",
-      description: "Classic denim jacket made from recycled materials",
-      stores: ["Patagonia", "REI", "Backcountry"],
-      reason: "Perfect for layering with your existing pieces"
-    },
-    {
-      id: 3,
-      name: "Minimalist Leather Sneakers",
-      brand: "Veja",
-      price: 120,
-      originalPrice: 140,
-      rating: 4.7,
-      reviews: 2100,
-      sustainable: { organic: false, recycled: true, local: false },
-      image: "https://images.unsplash.com/photo-1549298916-b41d501d3772?w=300&h=400&fit=crop",
-      category: "Shoes",
-      description: "Clean, minimal sneakers in sustainable materials",
-      stores: ["Veja", "End Clothing", "SSENSE"],
-      reason: "Versatile style that works with multiple outfits"
-    },
-    {
-      id: 4,
-      name: "Wool Blend Sweater",
-      brand: "Allbirds",
-      price: 79,
-      originalPrice: 99,
-      rating: 4.5,
-      reviews: 650,
-      sustainable: { organic: true, recycled: false, local: true },
-      image: "https://images.unsplash.com/photo-1620799140408-edc6dcb6d633?w=300&h=400&fit=crop",
-      category: "Top",
-      description: "Soft wool blend sweater in a relaxed fit",
-      stores: ["Allbirds", "ARKET", "Zara"],
-      reason: "Adds texture variety to your wardrobe"
-    },
-    {
-      id: 5,
-      name: "Organic Cotton Tee",
-      brand: "Reformation",
-      price: 45,
-      originalPrice: 58,
-      rating: 4.9,
-      reviews: 1850,
-      sustainable: { organic: true, recycled: false, local: true },
-      image: "https://images.unsplash.com/photo-1626496997178-7aa9d13b5799?w=300&h=400&fit=crop",
-      category: "Top",
-      description: "Essential organic cotton tee in classic colors",
-      stores: ["Reformation", "Nordstrom", "Net-a-Porter"],
-      reason: "A sustainable wardrobe staple"
-    },
-    {
-      id: 6,
-      name: "Recycled Polyester Pants",
-      brand: "Pangaia",
-      price: 110,
-      originalPrice: 140,
-      rating: 4.6,
-      reviews: 780,
-      sustainable: { organic: false, recycled: true, local: false },
-      image: "https://images.unsplash.com/photo-1473966968600-fa801b869a1a?w=300&h=400&fit=crop",
-      category: "Bottom",
-      description: "Modern pants made from recycled materials",
-      stores: ["Pangaia", "Selfridges", "Farfetch"],
-      reason: "Complements your existing style"
-    }
-  ];
+type DiscoveryProps = {
+  wardrobe: any[];
+  analyzedItem: any;
+};
 
-  const similar_alternatives = [
-    {
-      id: 1,
-      name: "Alternative Leather Jacket",
-      brand: "AllSaints",
-      price: 420,
-      originalPrice: 500,
-      rating: 4.9,
-      reviews: 850,
-      sustainability: "Standard",
-      image: "https://images.unsplash.com/photo-1520975954732-35dd22299614?w=300&h=400&fit=crop",
-      category: "Outerwear",
-      description: "Premium leather jacket with vintage finish",
-      stores: ["AllSaints", "Nordstrom", "ASOS"],
-      comparison: {
-        price: "Higher",
-        quality: "Premium",
-        sustainability: "Lower",
-        style: "Similar"
+const PAGE_SIZE = 24;
+const SIMILAR_PAGE_SIZE = 12;
+
+export function Discovery({ analyzedItem }: DiscoveryProps) {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [priceFilter, setPriceFilter] = useState('all');
+  const [categoryFilter, setCategoryFilter] = useState('all');
+
+  const [catalog, setCatalog] = useState<CatalogItem[]>([]);
+  const [catalogPage, setCatalogPage] = useState(1);
+  const [catalogTotalPages, setCatalogTotalPages] = useState(1);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+
+  const [selectedBaseItem, setSelectedBaseItem] = useState<CatalogItem | null>(null);
+  const [similarItems, setSimilarItems] = useState<CatalogItem[]>([]);
+  const [similarPage, setSimilarPage] = useState(1);
+  const [similarTotalPages, setSimilarTotalPages] = useState(1);
+  const [similarLoading, setSimilarLoading] = useState(false);
+
+  const analyzedCategory = analyzedItem?.detected_item?.type || '';
+
+  const currentCategory = useMemo(() => {
+    if (categoryFilter !== 'all') return categoryFilter;
+    return '';
+  }, [categoryFilter]);
+
+  useEffect(() => {
+    const loadCatalog = async () => {
+      setCatalogLoading(true);
+      try {
+        const params: any = {
+          page: catalogPage,
+          limit: PAGE_SIZE,
+        };
+
+        if (searchQuery.trim()) params.q = searchQuery.trim();
+        if (currentCategory) params.category = currentCategory;
+
+        if (priceFilter === 'budget') {
+          params.maxPrice = 49;
+        } else if (priceFilter === 'mid-range') {
+          params.minPrice = 50;
+          params.maxPrice = 149;
+        } else if (priceFilter === 'premium') {
+          params.minPrice = 150;
+        }
+
+        const response = await itemsAPI.getCatalog(params);
+        setCatalog(response.data.items || []);
+        setCatalogTotalPages(response.data.pagination?.totalPages || 1);
+      } catch (error) {
+        console.error('Failed to load catalog:', error);
+        setCatalog([]);
+        setCatalogTotalPages(1);
+      } finally {
+        setCatalogLoading(false);
       }
-    },
-    {
-      id: 2,
-      name: "Vegan Leather Jacket",
-      brand: "Stella McCartney",
-      price: 890,
-      originalPrice: 1200,
-      rating: 4.6,
-      reviews: 340,
-      sustainability: "Vegan Materials",
-      image: "https://images.unsplash.com/photo-1521223890158-f9f7c3d5d504?w=300&h=400&fit=crop",
-      category: "Outerwear",
-      description: "Luxury vegan leather jacket with modern silhouette",
-      stores: ["Stella McCartney", "Net-a-Porter", "Matches"],
-      comparison: {
-        price: "Much Higher",
-        quality: "Luxury",
-        sustainability: "Higher",
-        style: "Modern"
+    };
+
+    loadCatalog();
+  }, [catalogPage, searchQuery, currentCategory, priceFilter]);
+
+  useEffect(() => {
+    if (!selectedBaseItem?._id) return;
+
+    const loadSimilar = async () => {
+      setSimilarLoading(true);
+      try {
+        const response = await itemsAPI.getSimilarCatalogItems(selectedBaseItem._id, {
+          page: similarPage,
+          limit: SIMILAR_PAGE_SIZE,
+        });
+        setSimilarItems(response.data.items || []);
+        setSimilarTotalPages(response.data.pagination?.totalPages || 1);
+      } catch (error) {
+        console.error('Failed to load similar items:', error);
+        setSimilarItems([]);
+        setSimilarTotalPages(1);
+      } finally {
+        setSimilarLoading(false);
       }
-    }
-  ];
+    };
 
-  const toggleFavorite = (itemId) => {
-    if (favoriteItems.includes(itemId)) {
-      setFavoriteItems(favoriteItems.filter(id => id !== itemId));
-    } else {
-      setFavoriteItems([...favoriteItems, itemId]);
-    }
+    loadSimilar();
+  }, [selectedBaseItem, similarPage]);
+
+  const selectBaseItem = (item: CatalogItem) => {
+    setSelectedBaseItem(item);
+    setSimilarPage(1);
   };
 
-  const toggleCompare = (itemId) => {
-    if (compareItems.includes(itemId)) {
-      setCompareItems(compareItems.filter(id => id !== itemId));
-    } else if (compareItems.length < 3) {
-      setCompareItems([...compareItems, itemId]);
-    }
+  const getPriceTier = (price?: number) => {
+    if (typeof price !== 'number') return 'Unpriced';
+    if (price < 50) return 'Budget';
+    if (price < 150) return 'Mid-range';
+    return 'Premium';
   };
 
-  const getSustainabilityBadge = (sustainability) => {
-    const isEco = sustainability !== "Standard";
-    return (
-      <Badge 
-        variant={isEco ? "default" : "secondary"}
-        className={isEco ? "bg-green-100 text-green-800 border-green-200" : ""}
-      >
-        {isEco && <Leaf className="w-3 h-3 mr-1" />}
-        {sustainability}
-      </Badge>
-    );
-  };
+  const getImage = (item: CatalogItem) => item.imageUrl || 'https://images.unsplash.com/photo-1523381210434-271e8be1f52b?w=300&h=400&fit=crop';
 
-  const getPriceTier = (price) => {
-    if (price < 50) return "Budget";
-    if (price < 150) return "Mid-range";
-    return "Premium";
-  };
-
-  const filteredRecommendations = recommended_items.filter(item => {
-    if (priceFilter !== "all") {
-      const tier = getPriceTier(item.price);
-      if (tier.toLowerCase() !== priceFilter) return false;
-    }
-    
-    if (sustainabilityFilter === "sustainable" && item.sustainability === "Standard") {
-      return false;
-    }
-    
-    return true;
-  });
+  const renderPagination = (
+    page: number,
+    totalPages: number,
+    onPageChange: (page: number) => void
+  ) => (
+    <div className='flex items-center justify-center gap-2 pt-4'>
+      <Button variant='outline' size='sm' disabled={page <= 1} onClick={() => onPageChange(page - 1)}>
+        <ChevronLeft className='w-4 h-4' />
+      </Button>
+      <div className='flex items-center gap-1'>
+        {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => i + 1).map((p) => (
+          <Button
+            key={p}
+            variant={p === page ? 'default' : 'outline'}
+            size='sm'
+            onClick={() => onPageChange(p)}
+            className='min-w-9'
+          >
+            {p}
+          </Button>
+        ))}
+      </div>
+      <Button variant='outline' size='sm' disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>
+        <ChevronRight className='w-4 h-4' />
+      </Button>
+    </div>
+  );
 
   return (
-    <div className="space-y-6">
+    <div className='space-y-6'>
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Search className="w-5 h-5" />
-            Discovery & Shopping
+          <CardTitle className='flex items-center gap-2'>
+            <Search className='w-5 h-5' />
+            DeepFashion Discovery
           </CardTitle>
           <CardDescription>
-            Discover new items that complement your style and wardrobe
+            Browse a paginated catalog seeded from DeepFashion, including price bands and tags.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-wrap gap-4 mb-6">
-            <div className="flex items-center gap-2">
-              <Filter className="w-4 h-4" />
-              <Select value={priceFilter} onValueChange={setPriceFilter}>
-                <SelectTrigger className="w-32">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Prices</SelectItem>
-                  <SelectItem value="budget">Budget</SelectItem>
-                  <SelectItem value="mid-range">Mid-range</SelectItem>
-                  <SelectItem value="premium">Premium</SelectItem>
-                </SelectContent>
-              </Select>
+          <div className='flex flex-wrap gap-4 mb-4'>
+            <div className='flex items-center gap-2'>
+              <Filter className='w-4 h-4' />
+              <Input
+                value={searchQuery}
+                onChange={(e) => {
+                  setCatalogPage(1);
+                  setSearchQuery(e.target.value);
+                }}
+                placeholder='Search by name, category, tag'
+                className='w-60'
+              />
             </div>
-            
-            <Select value={sustainabilityFilter} onValueChange={setSustainabilityFilter}>
-              <SelectTrigger className="w-40">
-                <SelectValue />
+
+            <Select value={priceFilter} onValueChange={(value) => { setCatalogPage(1); setPriceFilter(value); }}>
+              <SelectTrigger className='w-36'>
+                <SelectValue placeholder='Price' />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Options</SelectItem>
-                <SelectItem value="sustainable">Sustainable Only</SelectItem>
+                <SelectItem value='all'>All Prices</SelectItem>
+                <SelectItem value='budget'>Budget</SelectItem>
+                <SelectItem value='mid-range'>Mid-range</SelectItem>
+                <SelectItem value='premium'>Premium</SelectItem>
               </SelectContent>
             </Select>
 
-            {compareItems.length > 0 && (
-              <Badge variant="outline" className="flex items-center gap-1">
-                <ArrowLeftRight className="w-3 h-3" />
-                {compareItems.length} items to compare
+            <Select value={categoryFilter} onValueChange={(value) => { setCatalogPage(1); setCategoryFilter(value); }}>
+              <SelectTrigger className='w-44'>
+                <SelectValue placeholder='Category' />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value='all'>All Categories</SelectItem>
+                <SelectItem value='top'>Top</SelectItem>
+                <SelectItem value='bottom'>Bottom</SelectItem>
+                <SelectItem value='dress'>Dress</SelectItem>
+                <SelectItem value='outerwear'>Outerwear</SelectItem>
+                <SelectItem value='shoes'>Shoes</SelectItem>
+              </SelectContent>
+            </Select>
+
+            {analyzedCategory && (
+              <Badge variant='outline' className='flex items-center gap-1'>
+                <Sparkles className='w-3 h-3' />
+                Detected category: {analyzedCategory}
               </Badge>
             )}
           </div>
 
-          {!analyzedItem && (
+          {!selectedBaseItem && (
             <Alert>
-              <Search className="h-4 w-4" />
+              <ArrowLeftRight className='h-4 w-4' />
               <AlertDescription>
-                Analyze a clothing item to get personalized recommendations and similar alternatives.
+                Choose any catalog item to load similar clothing in the Similar tab.
               </AlertDescription>
             </Alert>
           )}
         </CardContent>
       </Card>
 
-      <Tabs defaultValue="recommendations" className="w-full">
+      <Tabs defaultValue='recommendations' className='w-full'>
         <TabsList>
-          <TabsTrigger value="recommendations">Recommendations</TabsTrigger>
-          <TabsTrigger value="similar" disabled={!analyzedItem}>
-            Similar Items {!analyzedItem && "(Analyze item first)"}
-          </TabsTrigger>
-          <TabsTrigger value="trending">Trending</TabsTrigger>
+          <TabsTrigger value='recommendations'>Shop Catalog</TabsTrigger>
+          <TabsTrigger value='similar' disabled={!selectedBaseItem}>Similar Clothing</TabsTrigger>
+          <TabsTrigger value='trending'>Top Picks</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="recommendations" className="mt-6">
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filteredRecommendations.map((item) => (
-              <Card key={item.id} className="overflow-hidden">
-                <div className="relative">
-                  <ImageWithFallback
-                    src={item.image}
-                    alt={item.name}
-                    className="w-full h-48 object-cover"
-                  />
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="absolute top-2 right-2 bg-card/95 hover:bg-card shadow-lg border border-border"
-                    onClick={() => toggleFavorite(item.id)}
-                  >
-                    <Heart className={`w-4 h-4 ${favoriteItems.includes(item.id) ? "fill-current text-red-500" : "text-foreground"}`} />
-                  </Button>
-                </div>
-                <CardContent className="p-4">
-                  <div className="space-y-2">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <h3 className="font-medium line-clamp-1">{item.name}</h3>
-                        <p className="text-sm text-muted-foreground">{item.brand}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="font-medium">${item.price}</p>
-                        {item.originalPrice > item.price && (
-                          <p className="text-xs text-muted-foreground line-through">
-                            ${item.originalPrice}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                    
-                    <div className="flex items-center gap-1">
-                      <Star className="w-4 h-4 fill-current text-yellow-400" />
-                      <span className="text-sm">{item.rating}</span>
-                      <span className="text-xs text-muted-foreground">
-                        ({item.reviews} reviews)
-                      </span>
-                    </div>
-                    
-                    <div className="flex items-center gap-2">
-                      <Badge variant="outline">
-                        <DollarSign className="w-3 h-3 mr-1" />
-                        {getPriceTier(item.price)}
-                      </Badge>
-                      {getSustainabilityBadge(item.sustainability)}
-                    </div>
-                    
-                    <p className="text-xs text-muted-foreground">
-                      {item.reason}
-                    </p>
-                    
-                    <div className="flex gap-2 pt-2">
-                      <Button 
-                        size="sm" 
-                        className="flex-1"
-                        onClick={() => window.open(`https://${item.stores[0].toLowerCase().replace(' ', '')}.com`, '_blank')}
-                      >
-                        <ShoppingCart className="w-4 h-4 mr-1" />
-                        Buy
-                      </Button>
-                      <Button 
-                        variant="outline" 
-                        size="sm"
-                        onClick={() => toggleCompare(item.id)}
-                        disabled={compareItems.length >= 3 && !compareItems.includes(item.id)}
-                      >
-                        <ArrowLeftRight className="w-4 h-4" />
-                      </Button>
-                    </div>
-                    
-                    <div className="text-xs text-muted-foreground">
-                      Available at: {item.stores.join(', ')}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </TabsContent>
-
-        <TabsContent value="similar" className="mt-6">
-          {analyzedItem ? (
-            <div className="space-y-6">
-              <Alert>
-                <Search className="h-4 w-4" />
-                <AlertDescription>
-                  Similar items to your analyzed {analyzedItem.detected_item.color} {analyzedItem.detected_item.type}
-                </AlertDescription>
-              </Alert>
-              
-              <div className="grid md:grid-cols-2 gap-6">
-                {similar_alternatives.map((item) => (
-                  <Card key={item.id} className="overflow-hidden">
-                    <div className="flex">
-                      <ImageWithFallback
-                        src={item.image}
-                        alt={item.name}
-                        className="w-32 h-32 object-cover"
-                      />
-                      <div className="flex-1 p-4">
-                        <div className="space-y-2">
-                          <div>
-                            <h3 className="font-medium">{item.name}</h3>
-                            <p className="text-sm text-muted-foreground">{item.brand}</p>
-                          </div>
-                          
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-1">
-                              <Star className="w-4 h-4 fill-current text-yellow-400" />
-                              <span className="text-sm">{item.rating}</span>
-                            </div>
-                            <div>
-                              <p className="font-medium">${item.price}</p>
-                              {item.originalPrice > item.price && (
-                                <p className="text-xs text-muted-foreground line-through">
-                                  ${item.originalPrice}
-                                </p>
-                              )}
-                            </div>
-                          </div>
-                          
-                          <div className="grid grid-cols-2 gap-2 text-xs">
-                            <div>
-                              <span className="text-muted-foreground">Price: </span>
-                              <span className={item.comparison.price.includes('Higher') ? 'text-red-600' : 'text-green-600'}>
-                                {item.comparison.price}
-                              </span>
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground">Quality: </span>
-                              <span>{item.comparison.quality}</span>
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground">Sustainability: </span>
-                              <span className={item.comparison.sustainability === 'Higher' ? 'text-green-600' : 'text-red-600'}>
-                                {item.comparison.sustainability}
-                              </span>
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground">Style: </span>
-                              <span>{item.comparison.style}</span>
-                            </div>
-                          </div>
-                          
-                          <div className="flex gap-2 pt-1">
-                            <Button size="sm" className="flex-1">
-                              <ExternalLink className="w-3 h-3 mr-1" />
-                              View
-                            </Button>
-                            <Button variant="outline" size="sm" onClick={() => toggleCompare(item.id)}>
-                              <ArrowLeftRight className="w-3 h-3" />
-                            </Button>
-                          </div>
+        <TabsContent value='recommendations' className='mt-6'>
+          {catalogLoading ? (
+            <p className='text-muted-foreground'>Loading catalog...</p>
+          ) : catalog.length === 0 ? (
+            <p className='text-muted-foreground'>No catalog items found for this filter.</p>
+          ) : (
+            <>
+              <div className='grid md:grid-cols-2 lg:grid-cols-3 gap-6'>
+                {catalog.map((item) => (
+                  <Card key={item._id} className='overflow-hidden'>
+                    <ImageWithFallback src={getImage(item)} alt={item.name} className='w-full h-52 object-cover' />
+                    <CardContent className='p-4 space-y-3'>
+                      <div className='flex items-start justify-between gap-3'>
+                        <div>
+                          <h3 className='font-medium line-clamp-1'>{item.name}</h3>
+                          <p className='text-sm text-muted-foreground'>{item.brand || 'DeepFashion'}</p>
+                        </div>
+                        <div className='text-right'>
+                          <p className='font-medium'>${item.price ?? 'N/A'}</p>
+                          <Badge variant='outline'>{getPriceTier(item.price)}</Badge>
                         </div>
                       </div>
-                    </div>
+
+                      <div className='flex flex-wrap gap-1'>
+                        <Badge variant='secondary'>{item.category}</Badge>
+                        {(item.tags || []).slice(0, 3).map((tag) => (
+                          <Badge key={`${item._id}-${tag}`} variant='outline'>#{tag}</Badge>
+                        ))}
+                      </div>
+
+                      <div className='flex gap-2'>
+                        <Button className='flex-1' size='sm'>
+                          <ShoppingCart className='w-4 h-4 mr-1' />
+                          Shop
+                        </Button>
+                        <Button variant='outline' size='sm' onClick={() => selectBaseItem(item)}>
+                          <ArrowLeftRight className='w-4 h-4 mr-1' />
+                          Similar
+                        </Button>
+                      </div>
+                    </CardContent>
                   </Card>
                 ))}
               </div>
-            </div>
-          ) : (
-            <div className="text-center py-8">
-              <Search className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
-              <h3>No item analyzed yet</h3>
-              <p className="text-muted-foreground">
-                Upload and analyze a clothing item to see similar alternatives and comparisons.
-              </p>
-            </div>
+              {renderPagination(catalogPage, catalogTotalPages, setCatalogPage)}
+            </>
           )}
         </TabsContent>
 
-        <TabsContent value="trending" className="mt-6">
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {recommended_items.slice(0, 6).map((item) => (
-              <Card key={`trending-${item.id}`} className="overflow-hidden">
-                <div className="relative">
-                  <ImageWithFallback
-                    src={item.image}
-                    alt={item.name}
-                    className="w-full h-48 object-cover"
-                  />
-                  <Badge className="absolute top-2 left-2 bg-primary">
-                    Trending
-                  </Badge>
-                </div>
-                <CardContent className="p-4">
-                  <div className="space-y-2">
-                    <div>
-                      <h3 className="font-medium">{item.name}</h3>
-                      <p className="text-sm text-muted-foreground">{item.brand}</p>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1">
-                        <Star className="w-4 h-4 fill-current text-yellow-400" />
-                        <span className="text-sm">{item.rating}</span>
-                      </div>
-                      <p className="font-medium">${item.price}</p>
-                    </div>
-                    <Button size="sm" className="w-full">
-                      <ShoppingCart className="w-4 h-4 mr-2" />
-                      Shop Now
-                    </Button>
+        <TabsContent value='similar' className='mt-6'>
+          {!selectedBaseItem ? (
+            <p className='text-muted-foreground'>Select a catalog item from Shop Catalog first.</p>
+          ) : (
+            <>
+              <Alert>
+                <Search className='h-4 w-4' />
+                <AlertDescription>
+                  Showing items similar to: {selectedBaseItem.name}
+                </AlertDescription>
+              </Alert>
+
+              <div className='mt-4 grid md:grid-cols-2 lg:grid-cols-3 gap-6'>
+                {similarLoading ? (
+                  <p className='text-muted-foreground'>Loading similar items...</p>
+                ) : similarItems.length === 0 ? (
+                  <p className='text-muted-foreground'>No similar items found.</p>
+                ) : (
+                  similarItems.map((item) => (
+                    <Card key={item._id} className='overflow-hidden'>
+                      <ImageWithFallback src={getImage(item)} alt={item.name} className='w-full h-52 object-cover' />
+                      <CardContent className='p-4 space-y-3'>
+                        <div className='flex items-start justify-between'>
+                          <div>
+                            <h3 className='font-medium line-clamp-1'>{item.name}</h3>
+                            <p className='text-sm text-muted-foreground'>{item.brand || 'DeepFashion'}</p>
+                          </div>
+                          <p className='font-medium'>${item.price ?? 'N/A'}</p>
+                        </div>
+
+                        <div className='flex items-center gap-2'>
+                          <Badge variant='secondary'>{item.category}</Badge>
+                          <Badge variant='outline'>Match {(item.similarity ?? 0).toFixed(2)}</Badge>
+                        </div>
+
+                        <div className='flex flex-wrap gap-1'>
+                          {(item.tags || []).slice(0, 4).map((tag) => (
+                            <Badge key={`${item._id}-sim-${tag}`} variant='outline'>#{tag}</Badge>
+                          ))}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))
+                )}
+              </div>
+
+              {renderPagination(similarPage, similarTotalPages, setSimilarPage)}
+            </>
+          )}
+        </TabsContent>
+
+        <TabsContent value='trending' className='mt-6'>
+          <p className='text-muted-foreground mb-4'>Trending currently mirrors the top catalog items from page 1.</p>
+          <div className='grid md:grid-cols-2 lg:grid-cols-3 gap-6'>
+            {catalog.slice(0, 6).map((item) => (
+              <Card key={`trend-${item._id}`} className='overflow-hidden'>
+                <ImageWithFallback src={getImage(item)} alt={item.name} className='w-full h-48 object-cover' />
+                <CardContent className='p-4 space-y-2'>
+                  <div className='flex items-center justify-between'>
+                    <h3 className='font-medium line-clamp-1'>{item.name}</h3>
+                    <Badge>Trending</Badge>
                   </div>
+                  <p className='text-sm text-muted-foreground'>{item.category}</p>
+                  <p className='font-medium'>${item.price ?? 'N/A'}</p>
                 </CardContent>
               </Card>
             ))}

@@ -92,13 +92,14 @@ export function ImageAnalysis({ onAnalysisComplete }: { onAnalysisComplete: (res
     try {
       // Use the stored file directly instead of converting from base64
       const searchResult = await itemsAPI.searchByImage(selectedFile);
+      const topCategory = searchResult.data.results?.[0]?.category || '';
 
       if (searchResult.data.success && searchResult.data.results.length > 0) {
         // Transform search results into analysis format
         const isFallback = searchResult.data.fallback;
         const mockAnalysis = {
           detected_item: {
-            type: "Clothing Item",
+            type: topCategory,
             color: isFallback ? "Basic Detection" : "AI Analyzed",
             pattern: isFallback ? "Pattern Detected" : "AI Analyzed",
             fabric: isFallback ? "Material Detected" : "AI Analyzed",
@@ -141,7 +142,7 @@ export function ImageAnalysis({ onAnalysisComplete }: { onAnalysisComplete: (res
         // No similar items found
         const noResultsAnalysis = {
           detected_item: {
-            type: "Clothing Item",
+            type: "",
             color: "Detected",
             pattern: "AI Analyzed",
             fabric: "Material Detected",
@@ -171,7 +172,7 @@ export function ImageAnalysis({ onAnalysisComplete }: { onAnalysisComplete: (res
       // Fallback to basic analysis if AI search fails
       const fallbackAnalysis = {
         detected_item: {
-          type: "Clothing Item",
+          type: "",
           color: "Analysis Failed",
           pattern: "Error",
           fabric: "Unknown",

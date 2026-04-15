@@ -21,16 +21,139 @@ const upload = multer({
 
 router.get('/', verifyToken, async (req: AuthRequest, res) => {
   try {
-    const items = await Item.find({ uid: req.uid });
+    const items = await Item.find({ uid: req.uid, source: { $ne: 'deepfashion' } });
     res.json(items);
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch items' });
   }
 });
 
+// Paginated dataset catalog endpoint for Discovery/Shop pages
+router.get('/catalog', verifyToken, async (req: AuthRequest, res) => {
+  try {
+    const page = Math.max(parseInt(String(req.query.page || '1'), 10), 1);
+    const limit = Math.min(Math.max(parseInt(String(req.query.limit || '24'), 10), 1), 60);
+    const skip = (page - 1) * limit;
+
+    const q = String(req.query.q || '').trim();
+    const category = String(req.query.category || '').trim();
+    const tag = String(req.query.tag || '').trim();
+    const minPrice = req.query.minPrice ? Number(req.query.minPrice) : undefined;
+    const maxPrice = req.query.maxPrice ? Number(req.query.maxPrice) : undefined;
+
+    const query: any = { source: 'deepfashion' };
+
+    if (q) {
+      query.$or = [
+        { name: { $regex: q, $options: 'i' } },
+        { category: { $regex: q, $options: 'i' } },
+        { tags: { $elemMatch: { $regex: q, $options: 'i' } } },
+      ];
+    }
+
+    if (category) {
+      query.category = { $regex: `^${escapeRegex(category)}$`, $options: 'i' };
+    }
+
+    if (tag) {
+      query.tags = { $elemMatch: { $regex: `^${escapeRegex(tag)}$`, $options: 'i' } };
+    }
+
+    if (minPrice !== undefined || maxPrice !== undefined) {
+      query.price = {} as any;
+      if (minPrice !== undefined && !Number.isNaN(minPrice)) query.price.$gte = minPrice;
+      if (maxPrice !== undefined && !Number.isNaN(maxPrice)) query.price.$lte = maxPrice;
+    }
+
+    const [items, total] = await Promise.all([
+      Item.find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .select('name category tags price brand color material imageUrl source'),
+      Item.countDocuments(query),
+    ]);
+
+    res.json({
+      items,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+    });
+  } catch (error) {
+    console.error('Catalog fetch error:', error);
+    res.status(500).json({ error: 'Failed to fetch catalog items' });
+  }
+});
+
+// Similar dataset items by selected catalog item
+router.get('/catalog/similar/:id', verifyToken, async (req: AuthRequest, res) => {
+  try {
+    const page = Math.max(parseInt(String(req.query.page || '1'), 10), 1);
+    const limit = Math.min(Math.max(parseInt(String(req.query.limit || '12'), 10), 1), 60);
+    const skip = (page - 1) * limit;
+
+    const baseItem = await Item.findById(req.params.id).select('imageEmbedding category tags source');
+    if (!baseItem || baseItem.source !== 'deepfashion') {
+      return res.status(404).json({ error: 'Catalog item not found' });
+    }
+
+    const candidates = await Item.find({
+      _id: { $ne: baseItem._id },
+      source: 'deepfashion',
+      imageEmbedding: { $exists: true, $ne: [] },
+    }).select('name category tags price brand color material imageUrl imageEmbedding source');
+
+    const scored = candidates.map((item) => {
+      let similarity = 0;
+      if (baseItem.imageEmbedding && item.imageEmbedding && baseItem.imageEmbedding.length === item.imageEmbedding.length) {
+        similarity = cosineSimilarity(baseItem.imageEmbedding, item.imageEmbedding);
+      }
+
+      if (baseItem.category && item.category && baseItem.category.toLowerCase() === item.category.toLowerCase()) {
+        similarity += 0.08;
+      }
+
+      if (baseItem.tags?.length && item.tags?.length) {
+        const overlap = baseItem.tags.filter((tag) => item.tags.includes(tag)).length;
+        similarity += Math.min(0.12, overlap * 0.03);
+      }
+
+      return {
+        ...item.toObject(),
+        similarity: Math.max(0, Math.min(1, similarity)),
+      };
+    });
+
+    scored.sort((a, b) => b.similarity - a.similarity);
+    const total = scored.length;
+    const pageItems = scored.slice(skip, skip + limit);
+
+    res.json({
+      items: pageItems,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      },
+    });
+  } catch (error) {
+    console.error('Catalog similar fetch error:', error);
+    res.status(500).json({ error: 'Failed to fetch similar catalog items' });
+  }
+});
+
 router.post('/', verifyToken, upload.single('image'), async (req: AuthRequest, res) => {
   try {
-    const itemData = { ...req.body, uid: req.uid };
+    const itemData: any = { ...req.body, uid: req.uid, source: 'user' };
+
+    if (!Array.isArray(itemData.tags)) {
+      itemData.tags = itemData.tags ? [String(itemData.tags)] : [];
+    }
 
     if (req.file) {
       // Step 1: Upload image buffer to Cloudinary → get permanent URL
@@ -100,8 +223,13 @@ router.post('/search-image', verifyToken, upload.single('image'), async (req: Au
     const queryEmbedding = await extractImageEmbedding(req.file.buffer);
     console.log('Query embedding extracted');
 
-    // Get all items for this user
-    const allItems = await Item.find({ uid: req.uid }).select('name category color material imageUrl imageEmbedding');
+    // Search across the user's wardrobe and imported DeepFashion catalog items.
+    const allItems = await Item.find({
+      $or: [
+        { uid: req.uid },
+        { source: 'deepfashion' },
+      ],
+    }).select('name category color material imageUrl imageEmbedding source');
 
     if (allItems.length === 0) {
       return res.json({
@@ -245,4 +373,8 @@ function getColorVector(colorName: string): number[] {
 
   // Default to neutral gray if color not recognized
   return [0.5, 0.5, 0.5];
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
