@@ -9,7 +9,28 @@ import { Heart, Share2, ShoppingCart, Filter, Sparkles, Leaf, DollarSign, Award 
 import { Alert, AlertDescription } from "./ui/alert";
 import { calculateSustainabilityScore, getSustainabilityGrade, getSustainabilityBgColor } from '../utils/sustainabilityScore';
 
-export function OutfitBuilder({ analyzedItem, wardrobe }) {
+function normalizeWardrobeType(type) {
+  const normalized = String(type || '').trim().toLowerCase();
+  if (!normalized) return '';
+
+  if (/(top|shirt|tee|t-shirt|blouse|tank|sweater|hoodie|cardigan)/.test(normalized)) return 'top';
+  if (/(bottom|pant|pants|jean|jeans|skirt|short|shorts|trouser|leggings)/.test(normalized)) return 'bottom';
+  if (/(shoe|shoes|boot|boots|sneaker|sneakers|loafer|loafers|heel|heels|sandal|sandals|trainer)/.test(normalized)) return 'shoes';
+  if (/(outerwear|jacket|coat|blazer|parka|anorak)/.test(normalized)) return 'outerwear';
+  if (/(dress|gown)/.test(normalized)) return 'dress';
+
+  return normalized;
+}
+
+function normalizeStyle(style) {
+  return String(style || '').trim().toLowerCase();
+}
+
+function getPieceScore(piece) {
+  return piece.sustainabilityScore || calculateSustainabilityScore(piece.sustainable);
+}
+
+export function OutfitBuilder({ analyzedItem, wardrobe, onShopSuggestion }) {
   const [priceFilter, setPriceFilter] = useState("all");
   const [styleFilter, setStyleFilter] = useState("all");
   const [sustainabilityFilter, setSustainabilityFilter] = useState("all");
@@ -18,21 +39,22 @@ export function OutfitBuilder({ analyzedItem, wardrobe }) {
 
   // Generate outfits from wardrobe items
   const generateOutfitsFromWardrobe = () => {
-    const tops = wardrobe.filter(item => item.type === "Top");
-    const bottoms = wardrobe.filter(item => item.type === "Bottom");
-    const shoes = wardrobe.filter(item => item.type === "Shoes");
-    const outerwear = wardrobe.filter(item => item.type === "Outerwear");
+    const tops = wardrobe.filter(item => normalizeWardrobeType(item.type) === "top");
+    const bottoms = wardrobe.filter(item => normalizeWardrobeType(item.type) === "bottom");
+    const shoes = wardrobe.filter(item => normalizeWardrobeType(item.type) === "shoes");
+    const outerwear = wardrobe.filter(item => normalizeWardrobeType(item.type) === "outerwear");
+    const dresses = wardrobe.filter(item => normalizeWardrobeType(item.type) === "dress");
 
     const generatedOutfits = [];
 
     // Generate casual outfits
     if (tops.length > 0 && bottoms.length > 0 && shoes.length > 0) {
-      const casualTop = tops.find(t => t.style === "Casual") || tops[0];
-      const casualBottom = bottoms.find(b => b.style === "Casual") || bottoms[0];
+      const casualTop = tops.find(t => normalizeStyle(t.style).includes("casual")) || tops[0];
+      const casualBottom = bottoms.find(b => normalizeStyle(b.style).includes("casual")) || bottoms[0];
       const casualShoes = shoes[0];
       
       const pieces = [casualTop, casualBottom, casualShoes];
-      const outfitScore = Math.round(pieces.reduce((sum, p) => sum + (p.sustainabilityScore || calculateSustainabilityScore(p.sustainable)), 0) / pieces.length);
+      const outfitScore = Math.round(pieces.reduce((sum, p) => sum + getPieceScore(p), 0) / pieces.length);
       
       generatedOutfits.push({
         category: "Everyday Casual",
@@ -42,7 +64,7 @@ export function OutfitBuilder({ analyzedItem, wardrobe }) {
           image: p.image,
           brand: p.brand,
           price: p.price,
-          sustainabilityScore: p.sustainabilityScore || calculateSustainabilityScore(p.sustainable)
+          sustainabilityScore: getPieceScore(p)
         })),
         reasoning: "A comfortable everyday look using items from your wardrobe. Perfect for casual outings.",
         totalPrice: "$0",
@@ -51,12 +73,12 @@ export function OutfitBuilder({ analyzedItem, wardrobe }) {
     }
 
     // Generate smart casual outfit
-    const smartTops = tops.filter(t => t.style === "Smart Casual");
-    const smartBottoms = bottoms.filter(b => b.style === "Smart Casual");
+    const smartTops = tops.filter(t => normalizeStyle(t.style).includes("smart"));
+    const smartBottoms = bottoms.filter(b => normalizeStyle(b.style).includes("smart"));
     
     if (smartTops.length > 0 && smartBottoms.length > 0 && shoes.length > 0) {
       const pieces = [smartTops[0], smartBottoms[0], shoes[0]];
-      const outfitScore = Math.round(pieces.reduce((sum, p) => sum + (p.sustainabilityScore || calculateSustainabilityScore(p.sustainable)), 0) / pieces.length);
+      const outfitScore = Math.round(pieces.reduce((sum, p) => sum + getPieceScore(p), 0) / pieces.length);
       
       generatedOutfits.push({
         category: "Professional Smart",
@@ -66,7 +88,7 @@ export function OutfitBuilder({ analyzedItem, wardrobe }) {
           image: p.image,
           brand: p.brand,
           price: p.price,
-          sustainabilityScore: p.sustainabilityScore || calculateSustainabilityScore(p.sustainable)
+          sustainabilityScore: getPieceScore(p)
         })),
         reasoning: "A polished professional look using your existing wardrobe items.",
         totalPrice: "$0",
@@ -74,16 +96,39 @@ export function OutfitBuilder({ analyzedItem, wardrobe }) {
       });
     }
 
+    if (dresses.length > 0 && shoes.length > 0) {
+      const dress = dresses.find((item) => normalizeStyle(item.style).includes('casual')) || dresses[0];
+      const dressShoes = shoes[0];
+      const pieces = [dress, dressShoes];
+      const outfitScore = Math.round(pieces.reduce((sum, p) => sum + getPieceScore(p), 0) / pieces.length);
+
+      generatedOutfits.push({
+        category: "Easy Dress Look",
+        pieces: pieces.map((p) => ({
+          item: p.item,
+          source: "Your Wardrobe",
+          image: p.image,
+          brand: p.brand,
+          price: p.price,
+          sustainabilityScore: getPieceScore(p)
+        })),
+        reasoning: "A simple outfit built from a dress and matching shoes already in your wardrobe.",
+        totalPrice: "$0",
+        sustainabilityScore: outfitScore
+      });
+    }
+
     // Add outfit with recommendations for missing pieces
     if (tops.length > 0 && bottoms.length > 0) {
+      const jacketBase = outerwear[0];
       const recommendedJacket = {
-        item: "Sustainable Denim Jacket",
-        source: "Recommended - Patagonia",
-        image: "https://images.unsplash.com/photo-1551028719-00167b16eac5?w=300&h=400&fit=crop",
-        brand: "Patagonia",
-        price: 149,
-        isRecommendation: true,
-        sustainabilityScore: 85
+        item: jacketBase?.item || "Sustainable Denim Jacket",
+        source: jacketBase ? "Your Wardrobe" : "Recommended - Patagonia",
+        image: jacketBase?.image || "https://images.unsplash.com/photo-1551028719-00167b16eac5?w=300&h=400&fit=crop",
+        brand: jacketBase?.brand || "Patagonia",
+        price: jacketBase?.price || 149,
+        isRecommendation: !jacketBase,
+        sustainabilityScore: jacketBase ? getPieceScore(jacketBase) : 85
       };
       
       const pieces = [tops[0], bottoms[0], recommendedJacket];
@@ -92,14 +137,16 @@ export function OutfitBuilder({ analyzedItem, wardrobe }) {
       generatedOutfits.push({
         category: "Layered Style",
         pieces: [
-          { ...tops[0], item: tops[0].item, source: "Your Wardrobe", image: tops[0].image, brand: tops[0].brand, price: tops[0].price, sustainabilityScore: tops[0].sustainabilityScore || calculateSustainabilityScore(tops[0].sustainable) },
-          { ...bottoms[0], item: bottoms[0].item, source: "Your Wardrobe", image: bottoms[0].image, brand: bottoms[0].brand, price: bottoms[0].price, sustainabilityScore: bottoms[0].sustainabilityScore || calculateSustainabilityScore(bottoms[0].sustainable) },
+          { ...tops[0], item: tops[0].item, source: "Your Wardrobe", image: tops[0].image, brand: tops[0].brand, price: tops[0].price, sustainabilityScore: getPieceScore(tops[0]) },
+          { ...bottoms[0], item: bottoms[0].item, source: "Your Wardrobe", image: bottoms[0].image, brand: bottoms[0].brand, price: bottoms[0].price, sustainabilityScore: getPieceScore(bottoms[0]) },
           recommendedJacket
         ],
-        reasoning: "Complete this outfit with a sustainable jacket. Uses your existing pieces as a base.",
-        totalPrice: "$149",
+        reasoning: jacketBase
+          ? "A layered outfit using the outerwear you already own."
+          : "Complete this outfit with a sustainable jacket. Uses your existing pieces as a base.",
+        totalPrice: jacketBase ? "$0" : "$149",
         sustainabilityScore: outfitScore,
-        hasRecommendations: true
+        hasRecommendations: !jacketBase
       });
     }
 
@@ -138,6 +185,16 @@ export function OutfitBuilder({ analyzedItem, wardrobe }) {
     const summary = `Check out this ${outfit.category} outfit: ${outfit.pieces.map(p => p.item).join(', ')}`;
     navigator.clipboard.writeText(summary);
     // In a real app, this would share via social media or generate a shareable link
+  };
+
+  const shopRecommendedItems = (outfit) => {
+    const recommendedPiece = outfit.pieces.find((piece) => piece.isRecommendation);
+    if (!recommendedPiece) return;
+
+    onShopSuggestion?.({
+      query: recommendedPiece.item,
+      category: normalizeWardrobeType(recommendedPiece.item) || normalizeWardrobeType(outfit.category),
+    });
   };
 
   const filteredOutfits = mockOutfits.filter(outfit => {
@@ -286,7 +343,7 @@ export function OutfitBuilder({ analyzedItem, wardrobe }) {
                     {savedOutfits.includes(index) ? "Saved" : "Save Outfit"}
                   </Button>
                   {outfit.hasRecommendations && (
-                    <Button size="sm" className="flex-1 sm:flex-none">
+                    <Button size="sm" className="flex-1 sm:flex-none" onClick={() => shopRecommendedItems(outfit)}>
                       <ShoppingCart className="w-4 h-4 mr-2" />
                       Shop Items
                     </Button>

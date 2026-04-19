@@ -8,7 +8,7 @@ import { ShoppingCart, Trash2, Plus, Minus, Leaf, Tag, CreditCard } from "lucide
 import { toast } from "sonner";
 
 interface CartItem {
-  id: number;
+  id: string | number;
   name: string;
   brand: string;
   price: number;
@@ -29,10 +29,10 @@ interface CartProps {
 }
 
 export function Cart({ cart, setCart }: CartProps) {
-  const updateQuantity = (id: number, change: number) => {
+  const updateQuantity = (id: string | number, change: number) => {
     setCart(items =>
       items.map(item => {
-        if (item.id === id) {
+        if (String(item.id) === String(id)) {
           const newQuantity = Math.max(0, item.quantity + change);
           return { ...item, quantity: newQuantity };
         }
@@ -41,8 +41,8 @@ export function Cart({ cart, setCart }: CartProps) {
     );
   };
 
-  const removeItem = (id: number) => {
-    setCart(items => items.filter(item => item.id !== id));
+  const removeItem = (id: string | number) => {
+    setCart(items => items.filter(item => String(item.id) !== String(id)));
     toast.success("Item removed from cart");
   };
 

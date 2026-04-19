@@ -72,6 +72,10 @@ export const itemsAPI = {
     color?: string;
     material?: string;
     imageUrl?: string;
+    tags?: string[];
+    description?: string;
+    brand?: string;
+    price?: number;
   }) => {
     const axiosInstance = await createAuthenticatedAxios();
     return axiosInstance.post('/items', data);
@@ -116,6 +120,33 @@ export const itemsAPI = {
   ) => {
     const axiosInstance = await createAuthenticatedAxios();
     return axiosInstance.get(`/items/catalog/similar/${itemId}`, { params });
+  },
+  getRecommendations: async (params?: {
+    limit?: number;
+    weather?: string;
+    occasion?: string;
+    timeOfDay?: string;
+    season?: string;
+    category?: string;
+    baseItemId?: string;
+    sustainabilityWeight?: number;
+  }) => {
+    const axiosInstance = await createAuthenticatedAxios();
+    return axiosInstance.get('/items/recommendations', { params });
+  },
+  trackInteraction: async (data: {
+    itemId: string;
+    event: 'view' | 'like' | 'add_to_cart' | 'purchase';
+    context?: {
+      season?: string;
+      timeOfDay?: string;
+      weather?: string;
+      occasion?: string;
+      dwellTimeMs?: number;
+    };
+  }) => {
+    const axiosInstance = await createAuthenticatedAxios();
+    return axiosInstance.post('/items/interactions', data);
   },
 };
 

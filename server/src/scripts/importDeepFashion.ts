@@ -5,6 +5,7 @@ import mongoose from 'mongoose';
 import Item from '../models/Item';
 import { uploadBufferToCloudinary } from '../config/cloudinary';
 import { extractImageEmbedding } from '../services/clipImageSearch';
+import { buildStoreItemName, enrichItemMetadata } from '../utils/itemMetadata';
 
 dotenv.config();
 
@@ -75,17 +76,6 @@ function parseCategoryImg(filePath: string): ImageCategoryMap {
   return map;
 }
 
-function parseTagsFromPath(relativePath: string): string[] {
-  const safe = relativePath.replace(/\\/g, '/').toLowerCase();
-  const parts = safe.split('/').filter(Boolean);
-  const stem = parts[parts.length - 1] || '';
-
-  const tokens = [...parts.slice(0, -1), ...stem.replace(/\.[^.]+$/, '').split(/[_\-\s]+/)];
-  const unique = Array.from(new Set(tokens.filter((t) => t && t.length > 2)));
-
-  return unique.slice(0, 8);
-}
-
 function estimatePrice(category: string): number {
   const c = category.toLowerCase();
   if (c.includes('dress') || c.includes('coat') || c.includes('jacket')) return 95;
@@ -149,7 +139,7 @@ async function run() {
     const relative = path.relative(options.datasetRoot, fullPath).replace(/\\/g, '/');
 
     try {
-      const existing = await Item.findOne({ source: 'deepfashion', tags: { $in: [relative] } }).select('_id');
+      const existing = await Item.findOne({ source: 'deepfashion', sourcePath: relative }).select('_id');
       if (existing && !options.overwrite) {
         skipped += 1;
         continue;
@@ -169,17 +159,31 @@ async function run() {
       const mappedCategory = categoryId ? categoryCloth.get(categoryId) : undefined;
       const fallbackCategory = relative.split('/')[1] || 'unknown';
       const category = (mappedCategory || fallbackCategory).replace(/_/g, ' ');
-
-      const tags = Array.from(new Set([relative, ...parseTagsFromPath(relative), category.toLowerCase()]));
+      const itemName = buildStoreItemName(category, relative);
+      const enriched = enrichItemMetadata({
+        name: itemName,
+        category,
+        brand: 'The Alternative',
+        sourcePath: relative,
+      });
 
       const payload = {
         uid: null,
         source: 'deepfashion' as const,
-        name: `${category} ${path.basename(fullPath, path.extname(fullPath))}`.slice(0, 120),
+        sourcePath: relative,
+        name: itemName,
         category,
-        tags,
+        tags: enriched.tags,
+        description: enriched.description,
         price: estimatePrice(category),
-        brand: 'DeepFashion',
+        brand: 'The Alternative',
+        color: enriched.color,
+        material: enriched.material,
+        seasonality: enriched.seasonality,
+        occasions: enriched.occasions,
+        sustainabilityScore: enriched.sustainabilityScore,
+        brandEthicsScore: enriched.brandEthicsScore,
+        carbonScore: enriched.carbonScore,
         imageUrl,
         imageEmbedding: embedding,
       };

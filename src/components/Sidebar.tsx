@@ -20,10 +20,10 @@ export function Sidebar({ currentPage, setCurrentPage, cartCount }: SidebarProps
 
   const navItems = [
     { id: 'home', label: 'Shop', icon: Home },
+    { id: 'discover', label: 'Discover', icon: Search },
     { id: 'analyze', label: 'Analyze', icon: Camera },
     { id: 'outfits', label: 'Outfits', icon: Shirt },
     { id: 'wardrobe', label: 'Wardrobe', icon: Package },
-    { id: 'discover', label: 'Discover', icon: Search },
   ];
 
   const handleNavigation = (page: string) => {

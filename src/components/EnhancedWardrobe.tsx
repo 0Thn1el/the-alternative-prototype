@@ -55,9 +55,10 @@ interface EnhancedWardrobeProps {
   wardrobes: any[];
   setWardrobes: (wardrobes: any[]) => void;
   analyzedItem: any;
+  onShopSuggestion: (context: { query?: string; category?: string }) => void;
 }
 
-export function EnhancedWardrobe({ wardrobe, setWardrobe, wardrobes, setWardrobes, analyzedItem }: EnhancedWardrobeProps) {
+export function EnhancedWardrobe({ wardrobe, setWardrobe, wardrobes, setWardrobes, analyzedItem, onShopSuggestion }: EnhancedWardrobeProps) {
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
@@ -67,6 +68,7 @@ export function EnhancedWardrobe({ wardrobe, setWardrobe, wardrobes, setWardrobe
   const [showDetailDialog, setShowDetailDialog] = useState(false);
   const [selectedItem, setSelectedItem] = useState<ClothingItem | null>(null);
   const [editingItem, setEditingItem] = useState<ClothingItem | null>(null);
+  const [itemTagInput, setItemTagInput] = useState('');
   const [newItem, setNewItem] = useState<Partial<ClothingItem>>({
     item: '',
     type: '',
@@ -161,6 +163,10 @@ export function EnhancedWardrobe({ wardrobe, setWardrobe, wardrobes, setWardrobe
           color: newItem.color,
           material: newItem.fabric,
           imageUrl: newItem.image || undefined,
+          tags: newItem.customTags,
+          description: newItem.description,
+          brand: newItem.brand,
+          price: newItem.price,
         });
         resolvedMongoId = response.data._id;
       }
@@ -224,19 +230,47 @@ export function EnhancedWardrobe({ wardrobe, setWardrobe, wardrobes, setWardrobe
 
   const addTagToItem = (itemId: number, tag: string) => {
     if (!tag.trim()) return;
-    setWardrobe(wardrobe.map(item => 
+    const trimmedTag = tag.trim();
+    const currentItem = wardrobe.find((item) => item.id === itemId);
+    if (!currentItem || (currentItem.customTags || []).includes(trimmedTag)) return;
+
+    const nextWardrobe = wardrobe.map(item => 
       item.id === itemId 
-        ? { ...item, customTags: [...(item.customTags || []), tag.trim()] }
+        ? { ...item, customTags: [...(item.customTags || []), trimmedTag] }
         : item
-    ));
+    );
+    setWardrobe(nextWardrobe);
+
+    if (selectedItem?.id === itemId) {
+      setSelectedItem({ ...selectedItem, customTags: [...(selectedItem.customTags || []), trimmedTag] });
+    }
+
+    if (currentItem.mongoId) {
+      void itemsAPI.update(currentItem.mongoId, { tags: [...(currentItem.customTags || []), trimmedTag] }).catch((error) => {
+        console.warn('Failed to persist wardrobe tags:', error);
+      });
+    }
   };
 
   const removeTagFromItem = (itemId: number, tagToRemove: string) => {
+    const currentItem = wardrobe.find((item) => item.id === itemId);
+    const nextTags = (currentItem?.customTags || []).filter(tag => tag !== tagToRemove);
+
     setWardrobe(wardrobe.map(item => 
       item.id === itemId 
-        ? { ...item, customTags: (item.customTags || []).filter(tag => tag !== tagToRemove) }
+        ? { ...item, customTags: nextTags }
         : item
     ));
+
+    if (selectedItem?.id === itemId) {
+      setSelectedItem({ ...selectedItem, customTags: nextTags });
+    }
+
+    if (currentItem?.mongoId) {
+      void itemsAPI.update(currentItem.mongoId, { tags: nextTags }).catch((error) => {
+        console.warn('Failed to persist wardrobe tags:', error);
+      });
+    }
   };
 
   // Smart suggestions based on wardrobe
@@ -310,6 +344,7 @@ export function EnhancedWardrobe({ wardrobe, setWardrobe, wardrobes, setWardrobe
 
   const openDetailView = (item: ClothingItem) => {
     setSelectedItem(item);
+    setItemTagInput('');
     setShowDetailDialog(true);
   };
 
@@ -706,7 +741,7 @@ export function EnhancedWardrobe({ wardrobe, setWardrobe, wardrobes, setWardrobe
                   </div>
                   <div className="flex items-center gap-2">
                     <Badge variant="outline">{suggestion.type}</Badge>
-                    <Button size="sm" variant="outline">
+                    <Button size="sm" variant="outline" onClick={() => onShopSuggestion({ query: suggestion.name, category: suggestion.type.toLowerCase() })}>
                       <ShoppingBag className="w-4 h-4 mr-1" />
                       Shop
                     </Button>
@@ -754,6 +789,11 @@ export function EnhancedWardrobe({ wardrobe, setWardrobe, wardrobes, setWardrobe
                         <Badge className="bg-green-600 text-white text-xs">
                           <Package className="w-3 h-3 mr-1" />
                           Owned
+                        </Badge>
+                      )}
+                      {!item.isOwned && (
+                        <Badge variant="secondary" className="text-xs">
+                          Wishlist
                         </Badge>
                       )}
                       {item.isFavorite && (
@@ -1019,8 +1059,39 @@ export function EnhancedWardrobe({ wardrobe, setWardrobe, wardrobes, setWardrobe
                         <Badge key={index} variant="secondary" className="text-xs">
                           <Tag className="w-3 h-3 mr-1" />
                           {tag}
+                          <button
+                            type="button"
+                            className="ml-1"
+                            onClick={() => removeTagFromItem(selectedItem.id, tag)}
+                          >
+                            ×
+                          </button>
                         </Badge>
                       ))}
+                    </div>
+                    <div className="mt-3 flex gap-2">
+                      <Input
+                        value={itemTagInput}
+                        onChange={(e) => setItemTagInput(e.target.value)}
+                        placeholder="Add a tag"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            addTagToItem(selectedItem.id, itemTagInput);
+                            setItemTagInput('');
+                          }
+                        }}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          addTagToItem(selectedItem.id, itemTagInput);
+                          setItemTagInput('');
+                        }}
+                      >
+                        Add Tag
+                      </Button>
                     </div>
                   </div>
                   

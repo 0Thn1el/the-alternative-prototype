@@ -37,10 +37,15 @@ async function getCLIPModel() {
 }
 
 export async function extractImageEmbedding(imageBuffer: Buffer): Promise<number[]> {
+  if (process.platform === 'win32') {
+    return extractSharpFeatures(imageBuffer);
+  }
+
   // Try CLIP first for semantic image embeddings
   try {
-    const { processor: proc, visionModel: model, RawImage } = await getCLIPModel();
+    // Load Sharp before the transformer stack so the native binding is initialized first on Windows.
     const sharp = await getSharp();
+    const { processor: proc, visionModel: model, RawImage } = await getCLIPModel();
 
     // Write buffer to a temp file so RawImage can read it
     const tmpPath = path.join(os.tmpdir(), `clip-tmp-${Date.now()}.jpg`);

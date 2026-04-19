@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Sidebar } from './components/Sidebar';
 import { HomePage } from './components/HomePage';
+import { HomePageCatalog } from './components/HomePageCatalog';
 import { ImageAnalysis } from './components/ImageAnalysis';
 import { OutfitBuilder } from './components/OutfitBuilder';
 import { EnhancedWardrobe } from './components/EnhancedWardrobe';
@@ -14,12 +15,34 @@ import SignIn from './components/auth/SignIn';
 import SignUp from './components/auth/SignUp';
 import { useAuth } from './hooks/useAuth';
 import { itemsAPI } from './services/api';
+import { toast } from 'sonner';
 
+type CartItem = {
+  id: string | number;
+  name: string;
+  brand: string;
+  price: number;
+  image: string;
+  quantity: number;
+  size?: string;
+  color?: string;
+  sustainable?: {
+    organic: boolean;
+    recycled: boolean;
+    local: boolean;
+  };
+};
 
+type ShopLaunchContext = {
+  query?: string;
+  category?: string;
+};
 
-type User = {
-  email: string;
-  // add additional fields as needed
+type DiscoverLaunchContext = {
+  query?: string;
+  category?: string;
+  itemName?: string;
+  openSimilar?: boolean;
 };
 
 function getImageUrlFromDoc(doc: any): string {
@@ -27,6 +50,21 @@ function getImageUrlFromDoc(doc: any): string {
   if (typeof doc?.image === 'string' && doc.image.trim()) return doc.image;
   if (typeof doc?.image?.url === 'string' && doc.image.url.trim()) return doc.image.url;
   return 'https://images.unsplash.com/photo-1523381210434-271e8be1f52b?w=300&h=400&fit=crop';
+}
+
+function getDisplayBrand(brand?: string): string {
+  if (!brand || /deepfashion/i.test(brand)) return 'The Alternative';
+  return brand;
+}
+
+function normalizeCategoryForDiscover(category?: string): string | undefined {
+  const normalized = String(category || '').trim().toLowerCase();
+  if (!normalized) return undefined;
+
+  if (normalized === 'tops') return 'top';
+  if (normalized === 'bottoms') return 'bottom';
+  if (normalized === 'dresses') return 'dress';
+  return normalized;
 }
 
 export default function App() {
@@ -37,8 +75,10 @@ export default function App() {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [fontSize, setFontSize] = useState('medium');
   const [wardrobe, setWardrobe] = useState<any[]>([]);
+  const [shopLaunchContext, setShopLaunchContext] = useState<ShopLaunchContext | null>(null);
+  const [discoverLaunchContext, setDiscoverLaunchContext] = useState<DiscoverLaunchContext | null>(null);
   
-  const [cart, setCart] = useState([
+  const [cart, setCart] = useState<CartItem[]>([
     {
       id: 1,
       name: "Organic Cotton T-Shirt",
@@ -82,6 +122,75 @@ export default function App() {
   
   const [analyzedItem, setAnalyzedItem] = useState(null);
 
+  const requestAddToCart = (item: any, selection?: { size: string; quantity: number; stock: number }) => {
+    addToCart(item, selection);
+  };
+
+  const addToCart = (item: any, selection?: { size: string; quantity: number; stock: number }) => {
+    const cartId = item.cartId || item._id || item.mongoId || item.id || `${item.name}-${item.brand || 'brand'}`;
+    const quantityToAdd = selection?.quantity ?? 1;
+    const selectedSize = selection?.size || item.size;
+
+    setCart((currentCart) => {
+      const existingItem = currentCart.find(
+        (cartItem) => String(cartItem.id) === String(cartId) && String(cartItem.size || '') === String(selectedSize || '')
+      );
+
+      if (existingItem) {
+        toast.success(`${item.name} quantity updated in cart`);
+        return currentCart.map((cartItem) =>
+          String(cartItem.id) === String(cartId) && String(cartItem.size || '') === String(selectedSize || '')
+            ? { ...cartItem, quantity: cartItem.quantity + quantityToAdd }
+            : cartItem
+        );
+      }
+
+      toast.success(`${item.name} added to cart`);
+      return [
+        ...currentCart,
+        {
+          id: cartId,
+          name: item.name,
+          brand: getDisplayBrand(item.brand),
+          price: typeof item.price === 'number' ? item.price : 0,
+          image: item.image || item.imageUrl || getImageUrlFromDoc(item),
+          quantity: quantityToAdd,
+          size: selectedSize,
+          color: item.color,
+          sustainable: item.sustainable || {
+            organic: Boolean(String(item.material || '').toLowerCase().includes('organic')),
+            recycled: Boolean(String(item.material || '').toLowerCase().includes('recycled') || (item.tags || []).some((tag: string) => tag.toLowerCase().includes('recycled'))),
+            local: false,
+          },
+        },
+      ];
+    });
+
+    if (item._id) {
+      void itemsAPI.trackInteraction({
+        itemId: item._id,
+        event: 'add_to_cart',
+      }).catch((error) => {
+        console.warn('Failed to track add to cart interaction:', error);
+      });
+    }
+  };
+
+  const openShopWithSuggestion = (context: ShopLaunchContext) => {
+    setShopLaunchContext(context);
+    setCurrentPage('home');
+  };
+
+  const openDiscoverWithSimilar = (item: any) => {
+    setDiscoverLaunchContext({
+      query: item.name,
+      category: normalizeCategoryForDiscover(item.category || item.type),
+      itemName: item.name,
+      openSimilar: true,
+    });
+    setCurrentPage('discover');
+  };
+
   // Sync dark mode with document class
   useEffect(() => {
     if (isDarkMode) {
@@ -105,14 +214,21 @@ export default function App() {
           style: '',
           image: getImageUrlFromDoc(doc),
           fabric: doc.material || '',
-          customTags: [],
-          brand: '',
-          price: 0,
-          description: '',
+          customTags: doc.tags || [],
+          brand: getDisplayBrand(doc.brand),
+          price: typeof doc.price === 'number' ? doc.price : 0,
+          description: doc.description || '',
           isOwned: true,
           isFavorite: false,
-          materials: [],
-          sustainable: { organic: false, recycled: false, local: false },
+          materials: doc.material ? [doc.material] : [],
+          sustainable: {
+            organic: Boolean(String(doc.material || '').toLowerCase().includes('organic')),
+            recycled: Boolean(String(doc.material || '').toLowerCase().includes('recycled') || (doc.tags || []).some((tag: string) => String(tag).toLowerCase().includes('recycled'))),
+            local: false,
+          },
+          sustainabilityScore: doc.sustainabilityScore,
+          brandEthicsScore: doc.brandEthicsScore,
+          carbonScore: doc.carbonScore,
         }));
         setWardrobe(items);
       })
@@ -124,9 +240,26 @@ export default function App() {
   const renderPage = () => {
     switch (currentPage) {
       case 'home':
-        return <HomePage wardrobe={wardrobe} setWardrobe={setWardrobe} />;
+        return (
+          <HomePage
+            wardrobe={wardrobe}
+            setWardrobe={setWardrobe}
+            onAddToCart={requestAddToCart}
+            onViewSimilar={openDiscoverWithSimilar}
+          />
+        );
+      case 'discover':
+        return (
+          <Discovery
+            wardrobe={wardrobe}
+            analyzedItem={analyzedItem}
+            onAddToCart={requestAddToCart}
+            launchContext={discoverLaunchContext}
+            onLaunchContextConsumed={() => setDiscoverLaunchContext(null)}
+          />
+        );
       case 'analyze':
-        return <ImageAnalysis onAnalysisComplete={setAnalyzedItem} wardrobe={wardrobe} />;
+        return <ImageAnalysis onAnalysisComplete={setAnalyzedItem} />;
       case 'outfits':
         return <OutfitBuilder analyzedItem={analyzedItem} wardrobe={wardrobe} />;
       case 'wardrobe':
@@ -136,9 +269,8 @@ export default function App() {
           wardrobes={wardrobes}
           setWardrobes={setWardrobes}
           analyzedItem={analyzedItem} 
+          onShopSuggestion={openShopWithSuggestion}
         />;
-      case 'discover':
-        return <Discovery wardrobe={wardrobe} analyzedItem={analyzedItem} />;
       case 'settings':
         return <Settings 
           isDarkMode={isDarkMode} 
@@ -151,7 +283,14 @@ export default function App() {
       case 'profile':
         return <Profile />;
       default:
-        return <HomePage wardrobe={wardrobe} setWardrobe={setWardrobe} />;
+        return (
+          <HomePage
+            wardrobe={wardrobe}
+            setWardrobe={setWardrobe}
+            onAddToCart={requestAddToCart}
+            onViewSimilar={openDiscoverWithSimilar}
+          />
+        );
     }
   };
 
@@ -168,8 +307,7 @@ export default function App() {
       y: 0,
       scale: 1,
       transition: {
-        duration: 0.4,
-        ease: "easeOut"
+        duration: 0.4
       }
     },
     exit: { 

@@ -79,7 +79,7 @@ export function ScrollingClothesSection() {
   };
 
   return (
-    <div className="w-full overflow-hidden bg-gradient-to-r from-green-50 to-blue-50 dark:from-green-950/20 dark:to-blue-950/20 rounded-lg p-6 border border-border">
+    <div className="w-full overflow-hidden bg-black rounded-lg p-6 border border-white/10">
       <motion.div 
         className="text-center mb-6"
         initial={{ opacity: 0, y: -10 }}

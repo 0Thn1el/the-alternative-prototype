@@ -2,10 +2,21 @@ import express, { Router } from 'express';
 import { AuthRequest, verifyToken } from '../middleware/verifyToken';
 import Item from '../models/Item';
 import multer from 'multer';
-import { extractImageEmbedding, findSimilarItems, updateItemEmbedding } from '../services/clipImageSearch';
+import { extractImageEmbedding } from '../services/clipImageSearch';
 import { uploadBufferToCloudinary } from '../config/cloudinary';
+import { getHybridRecommendations, recordInteraction } from '../services/recommendations';
+import { InteractionEvent } from '../models/Interaction';
+import { enrichItemMetadata } from '../utils/itemMetadata';
 
 const router: Router = express.Router();
+
+const CATEGORY_BUCKET_PATTERNS: Record<string, string[]> = {
+  top: ['top', 'shirt', 'blouse', 'tee', 't-shirt', 'tank', 'sweater', 'hoodie', 'knit', 'cardigan', 'polo'],
+  bottom: ['bottom', 'jean', 'pant', 'trouser', 'skirt', 'short', 'legging'],
+  outerwear: ['outerwear', 'jacket', 'coat', 'blazer', 'anorak', 'parka'],
+  shoes: ['shoe', 'boot', 'sneaker', 'loafer', 'heel', 'sandal', 'trainer'],
+  dress: ['dress', 'gown'],
+};
 
 // Configure multer for image uploads
 const upload = multer({
@@ -25,6 +36,85 @@ router.get('/', verifyToken, async (req: AuthRequest, res) => {
     res.json(items);
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch items' });
+  }
+});
+
+router.get('/recommendations', verifyToken, async (req: AuthRequest, res) => {
+  try {
+    if (!req.uid) {
+      return res.status(401).json({ error: 'Missing authenticated user' });
+    }
+
+    const recommendations = await getHybridRecommendations(req.uid, {
+      weather: req.query.weather ? String(req.query.weather) : undefined,
+      occasion: req.query.occasion ? String(req.query.occasion) : undefined,
+      timeOfDay: req.query.timeOfDay ? String(req.query.timeOfDay) : undefined,
+      season: req.query.season ? String(req.query.season) : undefined,
+      category: req.query.category ? String(req.query.category) : undefined,
+      baseItemId: req.query.baseItemId ? String(req.query.baseItemId) : undefined,
+      sustainabilityWeight: req.query.sustainabilityWeight !== undefined ? Number(req.query.sustainabilityWeight) : undefined,
+      limit: req.query.limit !== undefined ? Number(req.query.limit) : undefined,
+    });
+
+    res.json({
+      items: recommendations,
+      context: {
+        weather: req.query.weather ?? null,
+        occasion: req.query.occasion ?? null,
+        timeOfDay: req.query.timeOfDay ?? null,
+        season: req.query.season ?? null,
+        category: req.query.category ?? null,
+        baseItemId: req.query.baseItemId ?? null,
+      },
+    });
+  } catch (error) {
+    console.error('Recommendation fetch error:', error);
+    res.status(500).json({ error: 'Failed to fetch recommendations' });
+  }
+});
+
+router.post('/interactions', verifyToken, async (req: AuthRequest, res) => {
+  try {
+    if (!req.uid) {
+      return res.status(401).json({ error: 'Missing authenticated user' });
+    }
+
+    const { itemId, event, context } = req.body as {
+      itemId?: string;
+      event?: InteractionEvent;
+      context?: {
+        season?: string;
+        timeOfDay?: string;
+        weather?: string;
+        occasion?: string;
+        dwellTimeMs?: number;
+      };
+    };
+
+    if (!itemId || !event) {
+      return res.status(400).json({ error: 'itemId and event are required' });
+    }
+
+    if (!['view', 'like', 'add_to_cart', 'purchase'].includes(event)) {
+      return res.status(400).json({ error: 'Unsupported interaction event' });
+    }
+
+    const itemExists = await Item.exists({ _id: itemId });
+    if (!itemExists) {
+      return res.status(404).json({ error: 'Item not found' });
+    }
+
+    await recordInteraction({
+      uid: req.uid,
+      itemId,
+      event,
+      context,
+    });
+
+    res.status(201).json({ success: true });
+  } catch (error) {
+    console.error('Interaction recording error:', error);
+    res.status(500).json({ error: 'Failed to record interaction' });
   }
 });
 
@@ -52,7 +142,12 @@ router.get('/catalog', verifyToken, async (req: AuthRequest, res) => {
     }
 
     if (category) {
-      query.category = { $regex: `^${escapeRegex(category)}$`, $options: 'i' };
+      const normalizedCategory = category.toLowerCase();
+      const bucketPatterns = CATEGORY_BUCKET_PATTERNS[normalizedCategory];
+
+      query.category = bucketPatterns
+        ? { $regex: bucketPatterns.map((pattern) => escapeRegex(pattern)).join('|'), $options: 'i' }
+        : { $regex: `^${escapeRegex(category)}$`, $options: 'i' };
     }
 
     if (tag) {
@@ -70,7 +165,7 @@ router.get('/catalog', verifyToken, async (req: AuthRequest, res) => {
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
-        .select('name category tags price brand color material imageUrl source'),
+        .select('name category tags description price brand color material imageUrl source seasonality occasions sustainabilityScore brandEthicsScore carbonScore'),
       Item.countDocuments(query),
     ]);
 
@@ -105,7 +200,7 @@ router.get('/catalog/similar/:id', verifyToken, async (req: AuthRequest, res) =>
       _id: { $ne: baseItem._id },
       source: 'deepfashion',
       imageEmbedding: { $exists: true, $ne: [] },
-    }).select('name category tags price brand color material imageUrl imageEmbedding source');
+    }).select('name category tags description price brand color material imageUrl imageEmbedding source seasonality occasions sustainabilityScore brandEthicsScore carbonScore');
 
     const scored = candidates.map((item) => {
       let similarity = 0;
@@ -179,6 +274,25 @@ router.post('/', verifyToken, upload.single('image'), async (req: AuthRequest, r
       }
     }
 
+    const enriched = enrichItemMetadata({
+      name: itemData.name,
+      category: itemData.category,
+      brand: itemData.brand,
+      material: itemData.material,
+      tags: itemData.tags,
+      description: itemData.description,
+    });
+
+    itemData.tags = enriched.tags;
+    itemData.description = itemData.description || enriched.description;
+    itemData.color = itemData.color || enriched.color;
+    itemData.material = itemData.material || enriched.material;
+    itemData.seasonality = enriched.seasonality;
+    itemData.occasions = enriched.occasions;
+    itemData.sustainabilityScore = enriched.sustainabilityScore;
+    itemData.brandEthicsScore = enriched.brandEthicsScore;
+    itemData.carbonScore = enriched.carbonScore;
+
     const newItem = new Item(itemData);
     const saved = await newItem.save();
     res.status(201).json(saved);
@@ -190,9 +304,31 @@ router.post('/', verifyToken, upload.single('image'), async (req: AuthRequest, r
 
 router.put('/:id', verifyToken, async (req: AuthRequest, res) => {
   try {
+    const nextBody = { ...req.body };
+    const existingItem = await Item.findById(req.params.id).select('name category brand material tags description');
+
+    const enriched = enrichItemMetadata({
+      name: nextBody.name || existingItem?.name || 'Item',
+      category: nextBody.category || existingItem?.category || 'unknown',
+      brand: nextBody.brand || existingItem?.brand,
+      material: nextBody.material || existingItem?.material,
+      tags: Array.isArray(nextBody.tags) ? nextBody.tags : existingItem?.tags,
+      description: nextBody.description || existingItem?.description,
+    });
+
+    nextBody.tags = Array.isArray(nextBody.tags) && nextBody.tags.length > 0 ? enriched.tags : enriched.tags;
+    nextBody.description = nextBody.description || enriched.description;
+    nextBody.color = nextBody.color || enriched.color;
+    nextBody.material = nextBody.material || enriched.material;
+    nextBody.seasonality = enriched.seasonality;
+    nextBody.occasions = enriched.occasions;
+    nextBody.sustainabilityScore = enriched.sustainabilityScore;
+    nextBody.brandEthicsScore = enriched.brandEthicsScore;
+    nextBody.carbonScore = enriched.carbonScore;
+
     const updated = await Item.findByIdAndUpdate(
       req.params.id,
-      req.body,
+      nextBody,
       { new: true }
     );
     res.json(updated);

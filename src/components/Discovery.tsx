@@ -6,33 +6,85 @@ import { Input } from './ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { ImageWithFallback } from './errors/ImageWithFallback';
-import { Search, ShoppingCart, ArrowLeftRight, Filter, ChevronLeft, ChevronRight, Sparkles } from 'lucide-react';
+import { Search, ShoppingCart, ArrowLeftRight, Filter, ChevronLeft, ChevronRight, Sparkles, Heart, Leaf } from 'lucide-react';
 import { Alert, AlertDescription } from './ui/alert';
 import { itemsAPI } from '../services/api';
+import { getSustainabilityBgColor, getSustainabilityGrade } from '../utils/sustainabilityScore';
 
 type CatalogItem = {
   _id: string;
   name: string;
   category: string;
   tags?: string[];
+  description?: string;
   price?: number;
   brand?: string;
+  color?: string;
+  material?: string;
   imageUrl?: string;
   similarity?: number;
+  sustainabilityScore?: number;
+  brandEthicsScore?: number;
+  carbonScore?: number;
+};
+
+type RecommendationItem = CatalogItem & {
+  score: number;
+  reasons: string[];
+  sustainabilityScore?: number;
+  scoreBreakdown: {
+    visualSimilarity: number;
+    behaviourMatch: number;
+    wardrobeCompatibility: number;
+    contextRelevance: number;
+    sustainabilityBoost: number;
+    total: number;
+  };
 };
 
 type DiscoveryProps = {
   wardrobe: any[];
   analyzedItem: any;
+  onAddToCart: (item: any) => void;
+  launchContext?: {
+    query?: string;
+    category?: string;
+    itemName?: string;
+    openSimilar?: boolean;
+  } | null;
+  onLaunchContextConsumed?: () => void;
 };
 
 const PAGE_SIZE = 24;
 const SIMILAR_PAGE_SIZE = 12;
 
-export function Discovery({ analyzedItem }: DiscoveryProps) {
+function getDisplayBrand(brand?: string): string {
+  if (!brand || /deepfashion/i.test(brand)) return 'The Alternative';
+  return brand;
+}
+
+function getCurrentSeason(): string {
+  const month = new Date().getMonth() + 1;
+  if (month <= 2 || month === 12) return 'winter';
+  if (month <= 5) return 'spring';
+  if (month <= 8) return 'summer';
+  return 'autumn';
+}
+
+function getCurrentTimeOfDay(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'morning';
+  if (hour < 18) return 'afternoon';
+  return 'evening';
+}
+
+export function Discovery({ analyzedItem, onAddToCart, launchContext, onLaunchContextConsumed }: DiscoveryProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [priceFilter, setPriceFilter] = useState('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
+  const [weather, setWeather] = useState('mild');
+  const [occasion, setOccasion] = useState('casual');
+  const [sustainabilityWeight, setSustainabilityWeight] = useState(50);
 
   const [catalog, setCatalog] = useState<CatalogItem[]>([]);
   const [catalogPage, setCatalogPage] = useState(1);
@@ -44,6 +96,10 @@ export function Discovery({ analyzedItem }: DiscoveryProps) {
   const [similarPage, setSimilarPage] = useState(1);
   const [similarTotalPages, setSimilarTotalPages] = useState(1);
   const [similarLoading, setSimilarLoading] = useState(false);
+  const [recommendations, setRecommendations] = useState<RecommendationItem[]>([]);
+  const [recommendationsLoading, setRecommendationsLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState('recommendations');
+  const [pendingSimilarName, setPendingSimilarName] = useState<string | null>(null);
 
   const analyzedCategory = analyzedItem?.detected_item?.type || '';
 
@@ -51,6 +107,21 @@ export function Discovery({ analyzedItem }: DiscoveryProps) {
     if (categoryFilter !== 'all') return categoryFilter;
     return '';
   }, [categoryFilter]);
+
+  useEffect(() => {
+    if (!launchContext) return;
+
+    setCatalogPage(1);
+    setSimilarPage(1);
+    setSelectedBaseItem(null);
+
+    if (launchContext.query !== undefined) setSearchQuery(launchContext.query);
+    setCategoryFilter(launchContext.category || 'all');
+    setActiveTab(launchContext.openSimilar ? 'similar' : 'recommendations');
+    setPendingSimilarName(launchContext.openSimilar ? launchContext.itemName || launchContext.query || null : null);
+
+    onLaunchContextConsumed?.();
+  }, [launchContext, onLaunchContextConsumed]);
 
   useEffect(() => {
     const loadCatalog = async () => {
@@ -89,6 +160,23 @@ export function Discovery({ analyzedItem }: DiscoveryProps) {
   }, [catalogPage, searchQuery, currentCategory, priceFilter]);
 
   useEffect(() => {
+    if (!pendingSimilarName || catalogLoading) return;
+
+    if (catalog.length === 0) {
+      setPendingSimilarName(null);
+      setActiveTab('recommendations');
+      return;
+    }
+
+    const normalizedName = pendingSimilarName.trim().toLowerCase();
+    const matchedItem = catalog.find((item) => item.name.trim().toLowerCase() === normalizedName) || catalog[0];
+
+    selectBaseItem(matchedItem);
+    setActiveTab('similar');
+    setPendingSimilarName(null);
+  }, [catalog, catalogLoading, pendingSimilarName]);
+
+  useEffect(() => {
     if (!selectedBaseItem?._id) return;
 
     const loadSimilar = async () => {
@@ -112,9 +200,63 @@ export function Discovery({ analyzedItem }: DiscoveryProps) {
     loadSimilar();
   }, [selectedBaseItem, similarPage]);
 
+  useEffect(() => {
+    const loadRecommendations = async () => {
+      setRecommendationsLoading(true);
+      try {
+        const response = await itemsAPI.getRecommendations({
+          limit: 6,
+          weather,
+          occasion,
+          timeOfDay: getCurrentTimeOfDay(),
+          season: getCurrentSeason(),
+          category: currentCategory || analyzedCategory || undefined,
+          baseItemId: selectedBaseItem?._id,
+          sustainabilityWeight: sustainabilityWeight / 100,
+        });
+        setRecommendations(response.data.items || []);
+      } catch (error) {
+        console.error('Failed to load recommendations:', error);
+        setRecommendations([]);
+      } finally {
+        setRecommendationsLoading(false);
+      }
+    };
+
+    loadRecommendations();
+  }, [weather, occasion, sustainabilityWeight, currentCategory, analyzedCategory, selectedBaseItem]);
+
   const selectBaseItem = (item: CatalogItem) => {
     setSelectedBaseItem(item);
     setSimilarPage(1);
+    setActiveTab('similar');
+    void itemsAPI.trackInteraction({
+      itemId: item._id,
+      event: 'view',
+      context: {
+        season: getCurrentSeason(),
+        timeOfDay: getCurrentTimeOfDay(),
+        weather,
+        occasion,
+      },
+    }).catch((error) => {
+      console.warn('Failed to track view interaction:', error);
+    });
+  };
+
+  const likeRecommendation = (itemId: string) => {
+    void itemsAPI.trackInteraction({
+      itemId,
+      event: 'like',
+      context: {
+        season: getCurrentSeason(),
+        timeOfDay: getCurrentTimeOfDay(),
+        weather,
+        occasion,
+      },
+    }).catch((error) => {
+      console.warn('Failed to track like interaction:', error);
+    });
   };
 
   const getPriceTier = (price?: number) => {
@@ -160,15 +302,15 @@ export function Discovery({ analyzedItem }: DiscoveryProps) {
         <CardHeader>
           <CardTitle className='flex items-center gap-2'>
             <Search className='w-5 h-5' />
-            DeepFashion Discovery
+            Discover The Alternative
           </CardTitle>
           <CardDescription>
-            Browse a paginated catalog seeded from DeepFashion, including price bands and tags.
+            Browse the live catalog, filter by style, and compare similar alternatives.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className='flex flex-wrap gap-4 mb-4'>
-            <div className='flex items-center gap-2'>
+          <div className='grid grid-cols-1 gap-4 mb-4 md:grid-cols-2 xl:grid-cols-6'>
+            <div className='flex min-w-0 items-center gap-2 md:col-span-2'>
               <Filter className='w-4 h-4' />
               <Input
                 value={searchQuery}
@@ -177,12 +319,12 @@ export function Discovery({ analyzedItem }: DiscoveryProps) {
                   setSearchQuery(e.target.value);
                 }}
                 placeholder='Search by name, category, tag'
-                className='w-60'
+                className='w-full'
               />
             </div>
 
             <Select value={priceFilter} onValueChange={(value) => { setCatalogPage(1); setPriceFilter(value); }}>
-              <SelectTrigger className='w-36'>
+              <SelectTrigger className='w-full'>
                 <SelectValue placeholder='Price' />
               </SelectTrigger>
               <SelectContent>
@@ -194,7 +336,7 @@ export function Discovery({ analyzedItem }: DiscoveryProps) {
             </Select>
 
             <Select value={categoryFilter} onValueChange={(value) => { setCatalogPage(1); setCategoryFilter(value); }}>
-              <SelectTrigger className='w-44'>
+              <SelectTrigger className='w-full'>
                 <SelectValue placeholder='Category' />
               </SelectTrigger>
               <SelectContent>
@@ -207,8 +349,47 @@ export function Discovery({ analyzedItem }: DiscoveryProps) {
               </SelectContent>
             </Select>
 
+            <Select value={weather} onValueChange={setWeather}>
+              <SelectTrigger className='w-full'>
+                <SelectValue placeholder='Weather' />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value='cold'>Cold</SelectItem>
+                <SelectItem value='mild'>Mild</SelectItem>
+                <SelectItem value='warm'>Warm</SelectItem>
+                <SelectItem value='rainy'>Rainy</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={occasion} onValueChange={setOccasion}>
+              <SelectTrigger className='w-full'>
+                <SelectValue placeholder='Occasion' />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value='casual'>Casual</SelectItem>
+                <SelectItem value='work'>Work</SelectItem>
+                <SelectItem value='evening'>Evening</SelectItem>
+                <SelectItem value='formal'>Formal</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <div className='flex min-w-0 flex-col gap-2'>
+              <div className='flex items-center justify-between text-sm text-muted-foreground'>
+                <span>Prioritize sustainability</span>
+                <span>{sustainabilityWeight}%</span>
+              </div>
+              <Input
+                type='range'
+                min='0'
+                max='100'
+                step='5'
+                value={sustainabilityWeight}
+                onChange={(event) => setSustainabilityWeight(Number(event.target.value))}
+              />
+            </div>
+
             {analyzedCategory && (
-              <Badge variant='outline' className='flex items-center gap-1'>
+              <Badge variant='outline' className='flex items-center gap-1 justify-center md:justify-start'>
                 <Sparkles className='w-3 h-3' />
                 Detected category: {analyzedCategory}
               </Badge>
@@ -226,11 +407,11 @@ export function Discovery({ analyzedItem }: DiscoveryProps) {
         </CardContent>
       </Card>
 
-      <Tabs defaultValue='recommendations' className='w-full'>
-        <TabsList>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className='w-full'>
+        <TabsList className='flex h-auto w-full flex-wrap justify-start gap-2'>
           <TabsTrigger value='recommendations'>Shop Catalog</TabsTrigger>
           <TabsTrigger value='similar' disabled={!selectedBaseItem}>Similar Clothing</TabsTrigger>
-          <TabsTrigger value='trending'>Top Picks</TabsTrigger>
+          <TabsTrigger value='trending'>Hybrid Picks</TabsTrigger>
         </TabsList>
 
         <TabsContent value='recommendations' className='mt-6'>
@@ -242,15 +423,15 @@ export function Discovery({ analyzedItem }: DiscoveryProps) {
             <>
               <div className='grid md:grid-cols-2 lg:grid-cols-3 gap-6'>
                 {catalog.map((item) => (
-                  <Card key={item._id} className='overflow-hidden'>
+                  <Card key={item._id} className='overflow-hidden min-w-0'>
                     <ImageWithFallback src={getImage(item)} alt={item.name} className='w-full h-52 object-cover' />
-                    <CardContent className='p-4 space-y-3'>
+                    <CardContent className='p-4 space-y-3 min-w-0'>
                       <div className='flex items-start justify-between gap-3'>
-                        <div>
+                        <div className='min-w-0'>
                           <h3 className='font-medium line-clamp-1'>{item.name}</h3>
-                          <p className='text-sm text-muted-foreground'>{item.brand || 'DeepFashion'}</p>
+                          <p className='text-sm text-muted-foreground'>{getDisplayBrand(item.brand)}</p>
                         </div>
-                        <div className='text-right'>
+                        <div className='shrink-0 text-right'>
                           <p className='font-medium'>${item.price ?? 'N/A'}</p>
                           <Badge variant='outline'>{getPriceTier(item.price)}</Badge>
                         </div>
@@ -258,15 +439,25 @@ export function Discovery({ analyzedItem }: DiscoveryProps) {
 
                       <div className='flex flex-wrap gap-1'>
                         <Badge variant='secondary'>{item.category}</Badge>
+                        {typeof item.sustainabilityScore === 'number' && (
+                          <Badge className={getSustainabilityBgColor(Math.round(item.sustainabilityScore * 100))}>
+                            <Leaf className='w-3 h-3 mr-1' />
+                            {getSustainabilityGrade(Math.round(item.sustainabilityScore * 100))}
+                          </Badge>
+                        )}
                         {(item.tags || []).slice(0, 3).map((tag) => (
-                          <Badge key={`${item._id}-${tag}`} variant='outline'>#{tag}</Badge>
+                          <Badge key={`${item._id}-${tag}`} variant='outline'>{tag}</Badge>
                         ))}
                       </div>
 
-                      <div className='flex gap-2'>
-                        <Button className='flex-1' size='sm'>
+                      {item.description && (
+                        <p className='text-sm text-muted-foreground line-clamp-2'>{item.description}</p>
+                      )}
+
+                      <div className='flex flex-col gap-2 sm:flex-row'>
+                        <Button className='flex-1' size='sm' onClick={() => onAddToCart({ ...item, image: getImage(item) })}>
                           <ShoppingCart className='w-4 h-4 mr-1' />
-                          Shop
+                          Add to Cart
                         </Button>
                         <Button variant='outline' size='sm' onClick={() => selectBaseItem(item)}>
                           <ArrowLeftRight className='w-4 h-4 mr-1' />
@@ -301,27 +492,37 @@ export function Discovery({ analyzedItem }: DiscoveryProps) {
                   <p className='text-muted-foreground'>No similar items found.</p>
                 ) : (
                   similarItems.map((item) => (
-                    <Card key={item._id} className='overflow-hidden'>
+                    <Card key={item._id} className='overflow-hidden min-w-0'>
                       <ImageWithFallback src={getImage(item)} alt={item.name} className='w-full h-52 object-cover' />
-                      <CardContent className='p-4 space-y-3'>
-                        <div className='flex items-start justify-between'>
-                          <div>
+                      <CardContent className='p-4 space-y-3 min-w-0'>
+                        <div className='flex items-start justify-between gap-3'>
+                          <div className='min-w-0'>
                             <h3 className='font-medium line-clamp-1'>{item.name}</h3>
-                            <p className='text-sm text-muted-foreground'>{item.brand || 'DeepFashion'}</p>
+                            <p className='text-sm text-muted-foreground'>{getDisplayBrand(item.brand)}</p>
                           </div>
-                          <p className='font-medium'>${item.price ?? 'N/A'}</p>
+                          <p className='shrink-0 font-medium'>${item.price ?? 'N/A'}</p>
                         </div>
 
                         <div className='flex items-center gap-2'>
                           <Badge variant='secondary'>{item.category}</Badge>
                           <Badge variant='outline'>Match {(item.similarity ?? 0).toFixed(2)}</Badge>
+                          {typeof item.sustainabilityScore === 'number' && (
+                            <Badge className={getSustainabilityBgColor(Math.round(item.sustainabilityScore * 100))}>
+                              {getSustainabilityGrade(Math.round(item.sustainabilityScore * 100))}
+                            </Badge>
+                          )}
                         </div>
 
                         <div className='flex flex-wrap gap-1'>
                           {(item.tags || []).slice(0, 4).map((tag) => (
-                            <Badge key={`${item._id}-sim-${tag}`} variant='outline'>#{tag}</Badge>
+                            <Badge key={`${item._id}-sim-${tag}`} variant='outline'>{tag}</Badge>
                           ))}
                         </div>
+
+                        <Button size='sm' onClick={() => onAddToCart({ ...item, image: getImage(item) })}>
+                          <ShoppingCart className='w-4 h-4 mr-1' />
+                          Add to Cart
+                        </Button>
                       </CardContent>
                     </Card>
                   ))
@@ -334,22 +535,71 @@ export function Discovery({ analyzedItem }: DiscoveryProps) {
         </TabsContent>
 
         <TabsContent value='trending' className='mt-6'>
-          <p className='text-muted-foreground mb-4'>Trending currently mirrors the top catalog items from page 1.</p>
-          <div className='grid md:grid-cols-2 lg:grid-cols-3 gap-6'>
-            {catalog.slice(0, 6).map((item) => (
-              <Card key={`trend-${item._id}`} className='overflow-hidden'>
-                <ImageWithFallback src={getImage(item)} alt={item.name} className='w-full h-48 object-cover' />
-                <CardContent className='p-4 space-y-2'>
-                  <div className='flex items-center justify-between'>
-                    <h3 className='font-medium line-clamp-1'>{item.name}</h3>
-                    <Badge>Trending</Badge>
-                  </div>
-                  <p className='text-sm text-muted-foreground'>{item.category}</p>
-                  <p className='font-medium'>${item.price ?? 'N/A'}</p>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+          <Alert className='mb-4'>
+            <Sparkles className='h-4 w-4' />
+            <AlertDescription>
+              Ranked using visual similarity, your interactions, wardrobe compatibility, current context, and sustainability preference.
+            </AlertDescription>
+          </Alert>
+
+          {recommendationsLoading ? (
+            <p className='text-muted-foreground'>Loading recommendations...</p>
+          ) : recommendations.length === 0 ? (
+            <p className='text-muted-foreground'>No recommendations available yet. Interact with catalog items to train the recommender.</p>
+          ) : (
+            <div className='grid md:grid-cols-2 lg:grid-cols-3 gap-6'>
+              {recommendations.map((item) => (
+                <Card key={`rec-${item._id}`} className='overflow-hidden min-w-0'>
+                  <ImageWithFallback src={getImage(item)} alt={item.name} className='w-full h-48 object-cover' />
+                  <CardContent className='p-4 space-y-3 min-w-0'>
+                    <div className='flex items-start justify-between gap-3'>
+                      <div className='min-w-0'>
+                        <h3 className='font-medium line-clamp-1'>{item.name}</h3>
+                        <p className='text-sm text-muted-foreground'>{getDisplayBrand(item.brand)}</p>
+                      </div>
+                      <Badge className='shrink-0'>Score {item.score.toFixed(2)}</Badge>
+                    </div>
+
+                    <div className='flex flex-wrap gap-1'>
+                      <Badge variant='secondary'>{item.category}</Badge>
+                      <Badge variant='outline'>Style {(item.scoreBreakdown.behaviourMatch * 100).toFixed(0)}%</Badge>
+                      <Badge variant='outline'>Wardrobe {(item.scoreBreakdown.wardrobeCompatibility * 100).toFixed(0)}%</Badge>
+                      <Badge variant='outline' className='flex items-center gap-1'>
+                        <Leaf className='w-3 h-3' />
+                        {(item.sustainabilityScore ?? item.scoreBreakdown.sustainabilityBoost).toFixed(2)}
+                      </Badge>
+                    </div>
+
+                    <div className='space-y-1'>
+                      {item.reasons.map((reason) => (
+                        <p key={`${item._id}-${reason}`} className='text-sm text-muted-foreground'>
+                          {reason}
+                        </p>
+                      ))}
+                    </div>
+
+                    <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
+                      <p className='font-medium'>${item.price ?? 'N/A'}</p>
+                      <div className='flex flex-wrap gap-2'>
+                        <Button variant='outline' size='sm' onClick={() => likeRecommendation(item._id)}>
+                          <Heart className='w-4 h-4 mr-1' />
+                          Like
+                        </Button>
+                        <Button variant='outline' size='sm' onClick={() => onAddToCart({ ...item, image: getImage(item) })}>
+                          <ShoppingCart className='w-4 h-4 mr-1' />
+                          Cart
+                        </Button>
+                        <Button size='sm' onClick={() => selectBaseItem(item)}>
+                          <ArrowLeftRight className='w-4 h-4 mr-1' />
+                          Similar
+                        </Button>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
         </TabsContent>
       </Tabs>
     </div>

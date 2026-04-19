@@ -8,10 +8,11 @@ import { Input } from "./ui/input";
 import { ImageWithFallback } from './errors/ImageWithFallback';
 import { ScrollingClothesSection } from './ScrollingClothesSection';
 import { ItemDetailModal } from './ItemDetailModal';
-import { Heart, ShoppingCart, Star, Filter, Plus, Search, Tag, Leaf, Recycle, MapPin } from "lucide-react";
+import { Heart, ShoppingCart, Star, Filter, Plus, Search, Tag, Leaf, Recycle, MapPin, ArrowLeftRight } from "lucide-react";
 import { toast } from "sonner";
+import { calculateSustainabilityScore, getSustainabilityBgColor, getSustainabilityGrade, getSustainabilityHighlights } from '../utils/sustainabilityScore';
 
-export function HomePage({ wardrobe, setWardrobe }) {
+export function HomePage({ wardrobe, setWardrobe, onAddToCart, onViewSimilar }: { wardrobe: any; setWardrobe: any; onAddToCart: (item: any) => void; onViewSimilar: (item: any) => void }) {
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [priceFilter, setPriceFilter] = useState("all");
@@ -277,12 +278,12 @@ export function HomePage({ wardrobe, setWardrobe }) {
       fabric: item.materials ? item.materials.join(', ') : '',
       materials: item.materials || [],
       sustainable: item.sustainable || { organic: false, recycled: false, local: false },
-      isOwned: true,
+      isOwned: false,
       isFavorite: false,
       description: item.description || ''
     };
     setWardrobe([...wardrobe, wardrobeItem]);
-    toast.success(`${item.name} added to your wardrobe!`);
+    toast.success(`${item.name} saved to your wardrobe wishlist.`);
   };
 
   const openItemDetail = (item) => {
@@ -290,7 +291,23 @@ export function HomePage({ wardrobe, setWardrobe }) {
     setShowDetailModal(true);
   };
 
+  const getItemSustainabilityScore = (item) => calculateSustainabilityScore({
+    sustainable: item.sustainable,
+    materials: item.materials,
+    tags: item.tags,
+    brand: item.brand,
+  });
+
+  const getItemSustainabilityHighlights = (item) => getSustainabilityHighlights({
+    sustainable: item.sustainable,
+    materials: item.materials,
+    tags: item.tags,
+    brand: item.brand,
+  });
+
   const filteredItems = saleItems.filter(item => {
+    const sustainabilityScore = getItemSustainabilityScore(item);
+
     if (searchQuery && !item.name.toLowerCase().includes(searchQuery.toLowerCase()) && 
         !item.brand.toLowerCase().includes(searchQuery.toLowerCase())) {
       return false;
@@ -302,6 +319,7 @@ export function HomePage({ wardrobe, setWardrobe }) {
       if (sustainabilityFilter === "organic" && !item.sustainable.organic) return false;
       if (sustainabilityFilter === "recycled" && !item.sustainable.recycled) return false;
       if (sustainabilityFilter === "local" && !item.sustainable.local) return false;
+      if (sustainabilityFilter === "high-score" && sustainabilityScore < 75) return false;
     }
     if (priceFilter !== "all") {
       const maxPrice = priceFilter === "under50" ? 50 : priceFilter === "50to100" ? 100 : priceFilter === "100to200" ? 200 : Infinity;
@@ -328,6 +346,12 @@ export function HomePage({ wardrobe, setWardrobe }) {
   const getUniqueBrands = () => {
     return [...new Set(saleItems.map(item => item.brand))].sort();
   };
+
+  const promoBadges = [
+    { icon: Leaf, text: "Organic Materials", className: "bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-300 dark:border-green-800" },
+    { icon: Recycle, text: "Recycled Fabrics", className: "bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-800" },
+    { icon: MapPin, text: "Local Production", className: "bg-purple-100 text-purple-800 border-purple-200 dark:bg-purple-900/30 dark:text-purple-300 dark:border-purple-800" },
+  ];
 
   return (
     <motion.div 
@@ -365,11 +389,7 @@ export function HomePage({ wardrobe, setWardrobe }) {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6, delay: 0.4 }}
         >
-          {[
-            { icon: Leaf, text: "Organic Materials", color: "green" },
-            { icon: Recycle, text: "Recycled Fabrics", color: "blue" },
-            { icon: MapPin, text: "Local Production", color: "purple" }
-          ].map((badge, index) => (
+          {promoBadges.map((badge, index) => (
             <motion.div
               key={badge.text}
               initial={{ opacity: 0, scale: 0.8 }}
@@ -380,9 +400,9 @@ export function HomePage({ wardrobe, setWardrobe }) {
             >
               <Badge 
                 variant="secondary" 
-                className={`text-sm md:text-lg px-3 md:px-4 py-1 md:py-2 bg-${badge.color}-100 dark:bg-${badge.color}-900/30 text-${badge.color}-800 dark:text-${badge.color}-300 border border-${badge.color}-200 dark:border-${badge.color}-800 cursor-default`}
+                className={`max-w-full whitespace-normal text-center text-sm md:text-base px-3 md:px-4 py-1 md:py-2 border cursor-default ${badge.className}`}
               >
-                <badge.icon className="w-4 h-4 mr-1" />
+                <badge.icon className="w-4 h-4 mr-1 shrink-0" />
                 {badge.text}
               </Badge>
             </motion.div>
@@ -421,8 +441,8 @@ export function HomePage({ wardrobe, setWardrobe }) {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7 gap-4">
-              <div className="relative sm:col-span-2 xl:col-span-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7 gap-4 items-start">
+              <div className="relative sm:col-span-2 xl:col-span-2 min-w-0">
                 <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground transition-transform hover:scale-110" />
                 <Input
                   placeholder="Search items..."
@@ -481,6 +501,7 @@ export function HomePage({ wardrobe, setWardrobe }) {
                   <SelectItem value="organic">Organic Only</SelectItem>
                   <SelectItem value="recycled">Recycled Only</SelectItem>
                   <SelectItem value="local">Local Only</SelectItem>
+                  <SelectItem value="high-score">Score 75+</SelectItem>
                 </SelectContent>
               </Select>
 
@@ -498,7 +519,7 @@ export function HomePage({ wardrobe, setWardrobe }) {
               </Select>
 
               <motion.div 
-                className="text-sm text-muted-foreground flex items-center justify-center xl:justify-start"
+                className="text-sm text-muted-foreground flex min-h-10 items-center justify-start sm:justify-center xl:justify-start"
                 key={filteredItems.length}
                 initial={{ scale: 1.2, color: "rgb(34 197 94)" }}
                 animate={{ scale: 1, color: "inherit" }}
@@ -518,9 +539,15 @@ export function HomePage({ wardrobe, setWardrobe }) {
       >
         <AnimatePresence mode="popLayout">
           {filteredItems.map((item, index) => (
+            (() => {
+              const sustainabilityScore = getItemSustainabilityScore(item);
+              const sustainabilityHighlights = getItemSustainabilityHighlights(item);
+
+              return (
             <motion.div
               key={item.id}
               layout
+              className="min-w-0"
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: -20 }}
@@ -531,7 +558,18 @@ export function HomePage({ wardrobe, setWardrobe }) {
               }}
               whileHover={{ y: -8, transition: { duration: 0.2 } }}
             >
-              <Card className="overflow-hidden group hover:shadow-xl transition-all duration-300 h-full">
+              <Card
+                className="h-full cursor-pointer overflow-hidden transition-all duration-300 group hover:shadow-xl"
+                onClick={() => openItemDetail(item)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    openItemDetail(item);
+                  }
+                }}
+                role="button"
+                tabIndex={0}
+              >
                 <div className="relative overflow-hidden">
                   <motion.div
                     whileHover={{ scale: 1.1 }}
@@ -540,8 +578,7 @@ export function HomePage({ wardrobe, setWardrobe }) {
                     <ImageWithFallback
                       src={item.image}
                       alt={item.name}
-                      className="w-full h-48 sm:h-56 md:h-64 object-cover cursor-pointer"
-                      onClick={() => openItemDetail(item)}
+                      className="w-full h-48 sm:h-56 md:h-64 object-cover"
                     />
                   </motion.div>
                   <div className="absolute top-2 left-2 flex flex-col gap-1">
@@ -562,9 +599,9 @@ export function HomePage({ wardrobe, setWardrobe }) {
                         transition={{ delay: index * 0.05 + 0.3 }}
                         whileHover={{ scale: 1.1, rotate: 5 }}
                       >
-                        <Badge variant="secondary" className="bg-green-100 dark:bg-green-900/50 text-green-800 dark:text-green-300 text-xs shadow-lg">
+                        <Badge variant="secondary" className={`${getSustainabilityBgColor(sustainabilityScore)} text-xs shadow-lg`}>
                           <Leaf className="w-3 h-3 mr-1" />
-                          Eco
+                          {getSustainabilityGrade(sustainabilityScore)}
                         </Badge>
                       </motion.div>
                     )}
@@ -577,7 +614,10 @@ export function HomePage({ wardrobe, setWardrobe }) {
                       variant="ghost"
                       size="sm"
                       className="absolute top-2 right-2 bg-card/95 hover:bg-card shadow-lg border border-border w-8 h-8 p-0 transition-all duration-200"
-                      onClick={() => toggleFavorite(item.id)}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        toggleFavorite(item.id);
+                      }}
                     >
                       <motion.div
                         animate={favoriteItems.includes(item.id) ? { scale: [1, 1.3, 1] } : {}}
@@ -589,7 +629,7 @@ export function HomePage({ wardrobe, setWardrobe }) {
                   </motion.div>
                 </div>
                 
-                <CardContent className="p-3 md:p-4">
+                <CardContent className="p-3 md:p-4 min-w-0">
                   <div className="space-y-2 md:space-y-3">
                     <motion.div
                       initial={{ opacity: 0, y: 5 }}
@@ -601,17 +641,17 @@ export function HomePage({ wardrobe, setWardrobe }) {
                     </motion.div>
                     
                     <motion.div 
-                      className="flex items-center justify-between"
+                      className="flex items-start justify-between gap-3"
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       transition={{ delay: index * 0.05 + 0.5 }}
                     >
-                      <div className="flex items-center gap-1">
+                      <div className="flex min-w-0 flex-wrap items-center gap-1">
                         <Star className="w-3 h-3 md:w-4 md:h-4 fill-current text-yellow-400" />
                         <span className="text-xs md:text-sm font-medium">{item.rating}</span>
                         <span className="text-xs text-muted-foreground">({item.reviews})</span>
                       </div>
-                      <div className="text-right">
+                      <div className="shrink-0 text-right">
                         <p className="font-bold text-sm md:text-lg text-green-600">${item.price}</p>
                         <p className="text-xs md:text-sm text-muted-foreground line-through">${item.originalPrice}</p>
                       </div>
@@ -624,7 +664,10 @@ export function HomePage({ wardrobe, setWardrobe }) {
                       animate={{ opacity: 1 }}
                       transition={{ delay: index * 0.05 + 0.6 }}
                     >
-                      <span className="text-xs text-muted-foreground">Sustainable:</span>
+                      <span className="text-xs text-muted-foreground">Sustainability:</span>
+                      <Badge className={getSustainabilityBgColor(sustainabilityScore)}>
+                        {sustainabilityScore}/100
+                      </Badge>
                       {getSustainabilityIcons(item.sustainable)}
                       {item.sustainable.organic && (
                         <Badge variant="secondary" className="text-xs bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 border border-green-200 dark:border-green-800 hover:scale-105 transition-transform">
@@ -641,11 +684,14 @@ export function HomePage({ wardrobe, setWardrobe }) {
                           Local
                         </Badge>
                       )}
+                      {sustainabilityHighlights.slice(0, 1).map((highlight) => (
+                        <Badge key={highlight} variant="outline" className="text-xs">{highlight}</Badge>
+                      ))}
                     </motion.div>
 
                     {/* Materials */}
                     <motion.div 
-                      className="text-xs text-muted-foreground"
+                      className="text-xs text-muted-foreground break-words"
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       transition={{ delay: index * 0.05 + 0.7 }}
@@ -674,7 +720,7 @@ export function HomePage({ wardrobe, setWardrobe }) {
                     </motion.div>
 
                     <motion.div 
-                      className="flex flex-col sm:flex-row gap-2 pt-2"
+                      className="grid grid-cols-1 gap-2 pt-2 sm:grid-cols-2"
                       initial={{ opacity: 0, y: 10 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: index * 0.05 + 0.9 }}
@@ -684,7 +730,14 @@ export function HomePage({ wardrobe, setWardrobe }) {
                         whileHover={{ scale: 1.02 }}
                         whileTap={{ scale: 0.98 }}
                       >
-                        <Button size="sm" className="w-full text-xs md:text-sm transition-all duration-200 hover:shadow-md">
+                        <Button
+                          size="sm"
+                          className="h-auto w-full whitespace-normal px-3 py-2 text-center text-xs leading-tight md:text-sm transition-all duration-200 hover:shadow-md"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openItemDetail(item);
+                          }}
+                        >
                           <ShoppingCart className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
                           Buy Now
                         </Button>
@@ -697,11 +750,32 @@ export function HomePage({ wardrobe, setWardrobe }) {
                         <Button 
                           variant="outline" 
                           size="sm" 
-                          className="w-full text-xs md:text-sm transition-all duration-200 hover:shadow-md"
-                          onClick={() => addToWardrobe(item)}
+                          className="h-auto w-full whitespace-normal px-3 py-2 text-center text-xs leading-tight md:text-sm transition-all duration-200 hover:shadow-md"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            addToWardrobe(item);
+                          }}
                         >
                           <Plus className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
-                          Add to Wardrobe
+                          Save to Wardrobe
+                        </Button>
+                      </motion.div>
+                      <motion.div
+                        className="sm:col-span-2"
+                        whileHover={{ scale: 1.01 }}
+                        whileTap={{ scale: 0.98 }}
+                      >
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          className="h-auto w-full whitespace-normal px-3 py-2 text-center text-xs leading-tight md:text-sm"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onViewSimilar(item);
+                          }}
+                        >
+                          <ArrowLeftRight className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
+                          Similar Styles
                         </Button>
                       </motion.div>
                     </motion.div>
@@ -709,6 +783,8 @@ export function HomePage({ wardrobe, setWardrobe }) {
                 </CardContent>
               </Card>
             </motion.div>
+              );
+            })()
           ))}
         </AnimatePresence>
       </motion.div>
@@ -749,6 +825,8 @@ export function HomePage({ wardrobe, setWardrobe }) {
         isOpen={showDetailModal}
         onClose={() => setShowDetailModal(false)}
         onAddToWardrobe={addToWardrobe}
+        onAddToCart={onAddToCart}
+        onViewSimilar={onViewSimilar}
         onToggleFavorite={toggleFavorite}
         isFavorite={selectedItem ? favoriteItems.includes(selectedItem.id) : false}
       />

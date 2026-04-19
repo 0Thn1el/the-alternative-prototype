@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -11,8 +11,28 @@ import { User, Mail, MapPin, Phone, CreditCard, Package, Heart, Award, Loader2 }
 import { toast } from "sonner";
 import { userAPI } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
+import { calculateSustainabilityScore, getSustainabilityGrade } from '../utils/sustainabilityScore';
 
-export function Profile() {
+type WardrobeItem = {
+  sustainable?: {
+    organic?: boolean;
+    recycled?: boolean;
+    local?: boolean;
+  };
+  fabric?: string;
+  materials?: string[];
+  customTags?: string[];
+  brand?: string;
+  sustainabilityScore?: number;
+  brandEthicsScore?: number;
+  carbonScore?: number;
+};
+
+interface ProfileProps {
+  wardrobe?: WardrobeItem[];
+}
+
+export function Profile({ wardrobe = [] }: ProfileProps) {
   const { user } = useAuth();
   const [profile, setProfile] = useState({
     name: "",
@@ -26,8 +46,25 @@ export function Profile() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  const buildFallbackProfile = () => ({
+    name: user?.displayName || "",
+    email: user?.email || "",
+    phone: "",
+    location: "",
+    joinDate: user?.metadata?.creationTime
+      ? new Date(user.metadata.creationTime).toLocaleDateString('en-US', {
+          year: 'numeric',
+          month: 'long'
+        })
+      : ""
+  });
+
   useEffect(() => {
     if (user) {
+      const fallbackProfile = buildFallbackProfile();
+      setProfile(fallbackProfile);
+      setEditedProfile(fallbackProfile);
+      setLoading(false);
       fetchUserProfile();
     } else {
       console.warn('Profile component rendered but user is not authenticated');
@@ -39,7 +76,6 @@ export function Profile() {
     if (!user) return;
     
     try {
-      setLoading(true);
       const response = await userAPI.getMe();
       const userData = response.data;
       
@@ -86,27 +122,13 @@ export function Profile() {
           setEditedProfile(profileData);
         } catch (createError) {
           console.error('Failed to create user profile:', createError);
-          // Fallback to Firebase user data
-          const profileData = {
-            name: user?.displayName || "",
-            email: user?.email || "",
-            phone: "",
-            location: "",
-            joinDate: ""
-          };
+          const profileData = buildFallbackProfile();
           setProfile(profileData);
           setEditedProfile(profileData);
           toast.error("Failed to load profile data");
         }
       } else {
-        // Fallback to Firebase user data if API fails
-        const profileData = {
-          name: user?.displayName || "",
-          email: user?.email || "",
-          phone: "",
-          location: "",
-          joinDate: ""
-        };
+        const profileData = buildFallbackProfile();
         setProfile(profileData);
         setEditedProfile(profileData);
         toast.error("Failed to load profile data from server");
@@ -172,6 +194,44 @@ export function Profile() {
     setIsEditing(false);
   };
 
+  const sustainabilityStats = useMemo(() => {
+    if (wardrobe.length === 0) {
+      return {
+        itemsSaved: 0,
+        co2Reduced: 0,
+        waterSaved: 0,
+        sustainabilityScore: 0,
+        grade: 'D',
+      };
+    }
+
+    const scores = wardrobe.map((item) => {
+      return calculateSustainabilityScore({
+        sustainable: item.sustainable,
+        material: item.fabric,
+        materials: item.materials,
+        tags: item.customTags,
+        brand: item.brand,
+        sustainabilityScore: item.sustainabilityScore,
+        brandEthicsScore: item.brandEthicsScore,
+        carbonScore: item.carbonScore,
+      });
+    });
+
+    const itemsSaved = scores.filter((score) => score >= 60).length;
+    const averageScore = Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length);
+    const co2Reduced = Math.round(scores.reduce((sum, score) => sum + (score / 100) * 3.3, 0));
+    const waterSaved = Math.round(scores.reduce((sum, score) => sum + (score / 100) * 88, 0));
+
+    return {
+      itemsSaved,
+      co2Reduced,
+      waterSaved,
+      sustainabilityScore: averageScore,
+      grade: getSustainabilityGrade(averageScore),
+    };
+  }, [wardrobe]);
+
   if (loading) {
     return (
       <div className="container mx-auto px-6 py-8">
@@ -182,13 +242,6 @@ export function Profile() {
       </div>
     );
   }
-
-  const sustainabilityStats = {
-    itemsSaved: 45,
-    co2Reduced: 128,
-    waterSaved: 3420,
-    sustainabilityScore: 87
-  };
 
   const orderHistory = [
     {
@@ -424,7 +477,7 @@ export function Profile() {
                     <p className="text-sm">Sustainability Score</p>
                   </div>
                   <p className="text-3xl">{sustainabilityStats.sustainabilityScore}%</p>
-                  <p className="text-xs text-muted-foreground">excellent rating!</p>
+                  <p className="text-xs text-muted-foreground">{sustainabilityStats.grade} rating from your current wardrobe</p>
                 </div>
 
                 <div className="p-4 border rounded-lg space-y-2">
