@@ -99,6 +99,7 @@ export function HomePageCatalog({
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [priceFilter, setPriceFilter] = useState('all');
+  const [sortBy, setSortBy] = useState('featured');
   const [styleFilter, setStyleFilter] = useState('all');
   const [sustainabilityFilter, setSustainabilityFilter] = useState('all');
   const [brandFilter, setBrandFilter] = useState('all');
@@ -217,12 +218,14 @@ export function HomePageCatalog({
   const shopItems = useMemo(() => {
     return catalog.map((item) => {
       const price = typeof item.price === 'number' ? item.price : 68;
+      const originalPrice = Math.round(price * 1.3);
       return {
         ...item,
         id: item._id,
         image: getImage(item),
         price,
-        originalPrice: Math.round(price * 1.3),
+        originalPrice,
+        discount: Math.max(0, Math.round(((originalPrice - price) / originalPrice) * 100)),
         rating: 4.6,
         reviews: 120,
         color: item.color || 'Neutral',
@@ -243,7 +246,7 @@ export function HomePageCatalog({
   }, [shopItems]);
 
   const filteredItems = useMemo(() => {
-    return shopItems.filter((item) => {
+    const items = shopItems.filter((item) => {
       const sustainabilityScore = calculateSustainabilityScore({
         sustainable: item.sustainable,
         materials: item.materials,
@@ -264,7 +267,25 @@ export function HomePageCatalog({
       if (sustainabilityFilter === 'high-score' && sustainabilityScore < 75) return false;
       return true;
     });
-  }, [brandFilter, categoryFilter, searchQuery, shopItems, styleFilter, sustainabilityFilter, tagFilter]);
+
+    if (sortBy === 'price-low-high') {
+      return [...items].sort((left, right) => left.price - right.price);
+    }
+
+    if (sortBy === 'price-high-low') {
+      return [...items].sort((left, right) => right.price - left.price);
+    }
+
+    if (sortBy === 'discount-low-high') {
+      return [...items].sort((left, right) => (left.discount || 0) - (right.discount || 0));
+    }
+
+    if (sortBy === 'discount-high-low') {
+      return [...items].sort((left, right) => (right.discount || 0) - (left.discount || 0));
+    }
+
+    return items;
+  }, [brandFilter, categoryFilter, searchQuery, shopItems, sortBy, styleFilter, sustainabilityFilter, tagFilter]);
 
   const getUniqueBrands = () => [...new Set(shopItems.map((item) => getDisplayBrand(item.brand)).filter(Boolean))].sort();
 
@@ -572,6 +593,16 @@ export function HomePageCatalog({
                 <SelectItem value="50to100">$50 - $100</SelectItem>
                 <SelectItem value="100to200">$100 - $200</SelectItem>
                 <SelectItem value="over200">Over $200</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={sortBy} onValueChange={setSortBy}>
+              <SelectTrigger><SelectValue placeholder="Sort By" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="featured">Sort By</SelectItem>
+                <SelectItem value="price-low-high">Price: Low to High</SelectItem>
+                <SelectItem value="price-high-low">Price: High to Low</SelectItem>
+                <SelectItem value="discount-low-high">Discount: Low to High</SelectItem>
+                <SelectItem value="discount-high-low">Discount: High to Low</SelectItem>
               </SelectContent>
             </Select>
             <div className="text-sm text-muted-foreground flex items-center">{filteredItems.length} items found</div>

@@ -5,46 +5,16 @@ import { Switch } from "./ui/switch";
 import { Separator } from "./ui/separator";
 import { Settings as SettingsIcon, Moon, Sun, Type } from "lucide-react";
 
+type FontSize = 'small' | 'medium' | 'large' | 'xlarge';
+
 interface SettingsProps {
   isDarkMode: boolean;
   setIsDarkMode: (value: boolean) => void;
-  fontSize: string;
-  setFontSize: (value: string) => void;
+  fontSize: FontSize;
+  setFontSize: (value: FontSize) => void;
 }
 
 export function Settings({ isDarkMode, setIsDarkMode, fontSize, setFontSize }: SettingsProps) {
-  const handleFontSizeChange = (value: string) => {
-    setFontSize(value);
-    
-    // Update CSS variable
-    const root = document.documentElement;
-    switch (value) {
-      case 'small':
-        root.style.setProperty('--font-size', '14px');
-        break;
-      case 'medium':
-        root.style.setProperty('--font-size', '16px');
-        break;
-      case 'large':
-        root.style.setProperty('--font-size', '18px');
-        break;
-      case 'xlarge':
-        root.style.setProperty('--font-size', '20px');
-        break;
-    }
-  };
-
-  const handleDarkModeToggle = (checked: boolean) => {
-    setIsDarkMode(checked);
-    
-    // Toggle dark mode class on document
-    if (checked) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-  };
-
   return (
     <div className="space-y-6">
       <Card>
@@ -77,7 +47,7 @@ export function Settings({ isDarkMode, setIsDarkMode, fontSize, setFontSize }: S
               <Switch
                 id="dark-mode"
                 checked={isDarkMode}
-                onCheckedChange={handleDarkModeToggle}
+                onCheckedChange={setIsDarkMode}
               />
             </div>
 
@@ -87,7 +57,7 @@ export function Settings({ isDarkMode, setIsDarkMode, fontSize, setFontSize }: S
                 <Type className="w-4 h-4" />
                 Font Size
               </Label>
-              <Select value={fontSize} onValueChange={handleFontSizeChange}>
+              <Select value={fontSize} onValueChange={setFontSize}>
                 <SelectTrigger id="font-size" className="w-full">
                   <SelectValue />
                 </SelectTrigger>

@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Sidebar } from './components/Sidebar';
 import { HomePage } from './components/HomePage';
-import { HomePageCatalog } from './components/HomePageCatalog';
 import { ImageAnalysis } from './components/ImageAnalysis';
 import { OutfitBuilder } from './components/OutfitBuilder';
 import { EnhancedWardrobe } from './components/EnhancedWardrobe';
@@ -18,6 +17,7 @@ import { itemsAPI } from './services/api';
 import { toast } from 'sonner';
 
 type CartItem = {
+  cartKey: string;
   id: string | number;
   name: string;
   brand: string;
@@ -33,16 +33,25 @@ type CartItem = {
   };
 };
 
-type ShopLaunchContext = {
-  query?: string;
-  category?: string;
-};
-
 type DiscoverLaunchContext = {
   query?: string;
   category?: string;
   itemName?: string;
   openSimilar?: boolean;
+};
+
+type ShopLaunchContext = {
+  query?: string;
+  category?: string;
+};
+
+type FontSize = 'small' | 'medium' | 'large' | 'xlarge';
+
+const FONT_SIZE_VALUES: Record<FontSize, string> = {
+  small: '14px',
+  medium: '16px',
+  large: '18px',
+  xlarge: '20px',
 };
 
 function getImageUrlFromDoc(doc: any): string {
@@ -67,52 +76,67 @@ function normalizeCategoryForDiscover(category?: string): string | undefined {
   return normalized;
 }
 
+function normalizeCategoryForShop(category?: string): string | undefined {
+  const normalized = String(category || '').trim().toLowerCase();
+  if (!normalized) return undefined;
+
+  if (normalized === 'top' || normalized === 'tops') return 'Top';
+  if (normalized === 'bottom' || normalized === 'bottoms') return 'Bottom';
+  if (normalized === 'dress' || normalized === 'dresses') return 'Dress';
+  if (normalized === 'outerwear' || normalized.includes('jacket') || normalized.includes('coat')) return 'Outerwear';
+  if (normalized === 'shoes' || normalized === 'shoe' || normalized.includes('boot') || normalized.includes('sneaker')) return 'Shoes';
+  return category;
+}
+
+function getCartItemName(item: any): string {
+  return item?.name || item?.item || 'Item';
+}
+
 export default function App() {
   const { user, loading } = useAuth();
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
 
   const [currentPage, setCurrentPage] = useState('home');
-  const [isDarkMode, setIsDarkMode] = useState(false);
-  const [fontSize, setFontSize] = useState('medium');
-  const [wardrobe, setWardrobe] = useState<any[]>([]);
-  const [shopLaunchContext, setShopLaunchContext] = useState<ShopLaunchContext | null>(null);
-  const [discoverLaunchContext, setDiscoverLaunchContext] = useState<DiscoverLaunchContext | null>(null);
-  
-  const [cart, setCart] = useState<CartItem[]>([
-    {
-      id: 1,
-      name: "Organic Cotton T-Shirt",
-      brand: "Everlane",
-      price: 28,
-      image: "https://images.unsplash.com/photo-1521572163474-6864f9cf17ab?w=300&h=400&fit=crop",
-      quantity: 1,
-      size: "M",
-      color: "White",
-      sustainable: { organic: true, recycled: false, local: true }
-    },
-    {
-      id: 2,
-      name: "Recycled Denim Jeans",
-      brand: "Everlane",
-      price: 98,
-      image: "https://images.unsplash.com/photo-1542272604-787c3835535d?w=300&h=400&fit=crop",
-      quantity: 1,
-      size: "32",
-      color: "Blue",
-      sustainable: { organic: false, recycled: true, local: false }
-    },
-    {
-      id: 3,
-      name: "Wool Runner Sneakers",
-      brand: "Allbirds",
-      price: 95,
-      image: "https://images.unsplash.com/photo-1549298916-b41d501d3772?w=300&h=400&fit=crop",
-      quantity: 1,
-      size: "9",
-      color: "White",
-      sustainable: { organic: false, recycled: true, local: false }
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem('isDarkMode') === 'true';
+  });
+  const [fontSize, setFontSize] = useState<FontSize>(() => {
+    if (typeof window === 'undefined') return 'medium';
+
+    const savedFontSize = window.localStorage.getItem('fontSize');
+    if (savedFontSize === 'small' || savedFontSize === 'medium' || savedFontSize === 'large' || savedFontSize === 'xlarge') {
+      return savedFontSize;
     }
-  ]);
+
+    return 'medium';
+  });
+  const [wardrobe, setWardrobe] = useState<any[]>([]);
+  const [discoverLaunchContext, setDiscoverLaunchContext] = useState<DiscoverLaunchContext | null>(null);
+  const [shopLaunchContext, setShopLaunchContext] = useState<ShopLaunchContext | null>(null);
+  
+  const [cart, setCart] = useState<CartItem[]>(() => {
+    if (typeof window === 'undefined') return [];
+
+    try {
+      const rawCart = window.localStorage.getItem('cart');
+      if (!rawCart) return [];
+      const parsedCart = JSON.parse(rawCart);
+      if (!Array.isArray(parsedCart)) return [];
+
+      return parsedCart.map((item: any) => {
+        const fallbackId = item.id || item._id || item.mongoId || getCartItemName(item);
+        const fallbackSize = item.size || '';
+        return {
+          ...item,
+          cartKey: item.cartKey || `${String(fallbackId)}::${String(fallbackSize)}`,
+        };
+      });
+    } catch (error) {
+      console.warn('Failed to parse saved cart:', error);
+      return [];
+    }
+  });
 
   const [wardrobes, setWardrobes] = useState([
     { id: 1, name: "Main Wardrobe", items: wardrobe },
@@ -127,30 +151,33 @@ export default function App() {
   };
 
   const addToCart = (item: any, selection?: { size: string; quantity: number; stock: number }) => {
-    const cartId = item.cartId || item._id || item.mongoId || item.id || `${item.name}-${item.brand || 'brand'}`;
+    const itemName = getCartItemName(item);
+    const cartId = item.cartId || item._id || item.mongoId || item.id || `${itemName}-${item.brand || 'brand'}`;
     const quantityToAdd = selection?.quantity ?? 1;
     const selectedSize = selection?.size || item.size;
+    const cartKey = `${String(cartId)}::${String(selectedSize || '')}`;
 
     setCart((currentCart) => {
       const existingItem = currentCart.find(
-        (cartItem) => String(cartItem.id) === String(cartId) && String(cartItem.size || '') === String(selectedSize || '')
+        (cartItem) => cartItem.cartKey === cartKey
       );
 
       if (existingItem) {
-        toast.success(`${item.name} quantity updated in cart`);
+        toast.success(`${itemName} quantity updated in cart`);
         return currentCart.map((cartItem) =>
-          String(cartItem.id) === String(cartId) && String(cartItem.size || '') === String(selectedSize || '')
+          cartItem.cartKey === cartKey
             ? { ...cartItem, quantity: cartItem.quantity + quantityToAdd }
             : cartItem
         );
       }
 
-      toast.success(`${item.name} added to cart`);
+      toast.success(`${itemName} added to cart`);
       return [
         ...currentCart,
         {
+          cartKey,
           id: cartId,
-          name: item.name,
+          name: itemName,
           brand: getDisplayBrand(item.brand),
           price: typeof item.price === 'number' ? item.price : 0,
           image: item.image || item.imageUrl || getImageUrlFromDoc(item),
@@ -158,8 +185,11 @@ export default function App() {
           size: selectedSize,
           color: item.color,
           sustainable: item.sustainable || {
-            organic: Boolean(String(item.material || '').toLowerCase().includes('organic')),
-            recycled: Boolean(String(item.material || '').toLowerCase().includes('recycled') || (item.tags || []).some((tag: string) => tag.toLowerCase().includes('recycled'))),
+            organic: Boolean(String(item.material || item.fabric || '').toLowerCase().includes('organic')),
+            recycled: Boolean(
+              String(item.material || item.fabric || '').toLowerCase().includes('recycled') ||
+              (item.tags || item.customTags || []).some((tag: string) => String(tag).toLowerCase().includes('recycled'))
+            ),
             local: false,
           },
         },
@@ -176,8 +206,15 @@ export default function App() {
     }
   };
 
-  const openShopWithSuggestion = (context: ShopLaunchContext) => {
-    setShopLaunchContext(context);
+  const openShopWithSuggestion = (context?: { query?: string; category?: string }) => {
+    setShopLaunchContext(
+      context
+        ? {
+            query: context.query,
+            category: normalizeCategoryForShop(context.category),
+          }
+        : null
+    );
     setCurrentPage('home');
   };
 
@@ -191,6 +228,19 @@ export default function App() {
     setCurrentPage('discover');
   };
 
+  const openDiscoverSearch = (context?: { query?: string; category?: string }) => {
+    setDiscoverLaunchContext(
+      context
+        ? {
+            query: context.query,
+            category: normalizeCategoryForDiscover(context.category),
+            openSimilar: false,
+          }
+        : null
+    );
+    setCurrentPage('discover');
+  };
+
   // Sync dark mode with document class
   useEffect(() => {
     if (isDarkMode) {
@@ -198,7 +248,18 @@ export default function App() {
     } else {
       document.documentElement.classList.remove('dark');
     }
+
+    window.localStorage.setItem('isDarkMode', String(isDarkMode));
   }, [isDarkMode]);
+
+  useEffect(() => {
+    document.documentElement.style.setProperty('--font-size', FONT_SIZE_VALUES[fontSize]);
+    window.localStorage.setItem('fontSize', fontSize);
+  }, [fontSize]);
+
+  useEffect(() => {
+    window.localStorage.setItem('cart', JSON.stringify(cart));
+  }, [cart]);
 
   // Load wardrobe from MongoDB when user signs in
   useEffect(() => {
@@ -246,12 +307,15 @@ export default function App() {
             setWardrobe={setWardrobe}
             onAddToCart={requestAddToCart}
             onViewSimilar={openDiscoverWithSimilar}
+            launchContext={shopLaunchContext}
+            onLaunchContextConsumed={() => setShopLaunchContext(null)}
           />
         );
       case 'discover':
         return (
           <Discovery
             wardrobe={wardrobe}
+            setWardrobe={setWardrobe}
             analyzedItem={analyzedItem}
             onAddToCart={requestAddToCart}
             launchContext={discoverLaunchContext}
@@ -261,15 +325,13 @@ export default function App() {
       case 'analyze':
         return <ImageAnalysis onAnalysisComplete={setAnalyzedItem} />;
       case 'outfits':
-        return <OutfitBuilder analyzedItem={analyzedItem} wardrobe={wardrobe} />;
+        return <OutfitBuilder analyzedItem={analyzedItem} wardrobe={wardrobe} onShopSuggestion={openShopWithSuggestion} />;
       case 'wardrobe':
         return <EnhancedWardrobe 
           wardrobe={wardrobe} 
           setWardrobe={setWardrobe} 
-          wardrobes={wardrobes}
-          setWardrobes={setWardrobes}
-          analyzedItem={analyzedItem} 
-          onShopSuggestion={openShopWithSuggestion}
+          onAddToCart={requestAddToCart}
+          onDiscoverSuggestion={openDiscoverSearch}
         />;
       case 'settings':
         return <Settings 
@@ -281,7 +343,7 @@ export default function App() {
       case 'cart':
         return <Cart cart={cart} setCart={setCart} />;
       case 'profile':
-        return <Profile />;
+        return <Profile wardrobe={wardrobe} />;
       default:
         return (
           <HomePage
@@ -289,6 +351,8 @@ export default function App() {
             setWardrobe={setWardrobe}
             onAddToCart={requestAddToCart}
             onViewSimilar={openDiscoverWithSimilar}
+            launchContext={shopLaunchContext}
+            onLaunchContextConsumed={() => setShopLaunchContext(null)}
           />
         );
     }
@@ -339,7 +403,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-background">
-      <Sidebar currentPage={currentPage} setCurrentPage={setCurrentPage} cartCount={cart.length} />
+      <Sidebar currentPage={currentPage} setCurrentPage={setCurrentPage} cartCount={cart.reduce((sum, item) => sum + item.quantity, 0)} />
       <main className="lg:ml-64">
         <div className="container mx-auto px-6 md:px-8 lg:px-12 py-6 md:py-10 lg:py-12 max-w-7xl">
           <AnimatePresence mode="wait">

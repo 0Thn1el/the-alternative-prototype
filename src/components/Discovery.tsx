@@ -1,15 +1,20 @@
 import { useEffect, useMemo, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { Input } from './ui/input';
+import { Slider } from './ui/slider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { ImageWithFallback } from './errors/ImageWithFallback';
-import { Search, ShoppingCart, ArrowLeftRight, Filter, ChevronLeft, ChevronRight, Sparkles, Heart, Leaf } from 'lucide-react';
+import { Search, ShoppingCart, ArrowLeftRight, Filter, ChevronLeft, ChevronRight, Sparkles, Heart, Leaf, MapPin, Plus, Recycle, Star, Tag } from 'lucide-react';
 import { Alert, AlertDescription } from './ui/alert';
+import { ItemDetailModal } from './ItemDetailModal';
 import { itemsAPI } from '../services/api';
-import { getSustainabilityBgColor, getSustainabilityGrade } from '../utils/sustainabilityScore';
+import { formatItemName } from '../utils/formatItemName';
+import { toast } from 'sonner';
+import { calculateSustainabilityScore, getSustainabilityBgColor, getSustainabilityGrade, getSustainabilityHighlights } from '../utils/sustainabilityScore';
 
 type CatalogItem = {
   _id: string;
@@ -44,6 +49,7 @@ type RecommendationItem = CatalogItem & {
 
 type DiscoveryProps = {
   wardrobe: any[];
+  setWardrobe: React.Dispatch<React.SetStateAction<any[]>>;
   analyzedItem: any;
   onAddToCart: (item: any) => void;
   launchContext?: {
@@ -57,6 +63,7 @@ type DiscoveryProps = {
 
 const PAGE_SIZE = 24;
 const SIMILAR_PAGE_SIZE = 12;
+const DEFAULT_PRICE_RANGE = [0, 500] as const;
 
 function getDisplayBrand(brand?: string): string {
   if (!brand || /deepfashion/i.test(brand)) return 'The Alternative';
@@ -78,9 +85,11 @@ function getCurrentTimeOfDay(): string {
   return 'evening';
 }
 
-export function Discovery({ analyzedItem, onAddToCart, launchContext, onLaunchContextConsumed }: DiscoveryProps) {
+export function Discovery({ wardrobe, setWardrobe, analyzedItem, onAddToCart, launchContext, onLaunchContextConsumed }: DiscoveryProps) {
   const [searchQuery, setSearchQuery] = useState('');
-  const [priceFilter, setPriceFilter] = useState('all');
+  const [priceRange, setPriceRange] = useState<number[]>([...DEFAULT_PRICE_RANGE]);
+  const [appliedPriceRange, setAppliedPriceRange] = useState<number[]>([...DEFAULT_PRICE_RANGE]);
+  const [priceSort, setPriceSort] = useState('featured');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [weather, setWeather] = useState('mild');
   const [occasion, setOccasion] = useState('casual');
@@ -100,6 +109,9 @@ export function Discovery({ analyzedItem, onAddToCart, launchContext, onLaunchCo
   const [recommendationsLoading, setRecommendationsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('recommendations');
   const [pendingSimilarName, setPendingSimilarName] = useState<string | null>(null);
+  const [favoriteItems, setFavoriteItems] = useState<string[]>([]);
+  const [selectedItem, setSelectedItem] = useState<any | null>(null);
+  const [showDetailModal, setShowDetailModal] = useState(false);
 
   const analyzedCategory = analyzedItem?.detected_item?.type || '';
 
@@ -107,6 +119,52 @@ export function Discovery({ analyzedItem, onAddToCart, launchContext, onLaunchCo
     if (categoryFilter !== 'all') return categoryFilter;
     return '';
   }, [categoryFilter]);
+
+  const getSortableDiscount = (item: any) => {
+    if (typeof item.discount === 'number') return item.discount;
+    const source = String(item._id || item.id || item.name || 'item');
+    const seed = Array.from(source).reduce((total, character) => total + character.charCodeAt(0), 0);
+    return 18 + (seed % 23);
+  };
+
+  const sortItems = <T extends { price?: number }>(items: T[]) => {
+    const nextItems = [...items];
+
+    if (priceSort === 'price-low-high') {
+      return nextItems.sort((left, right) => {
+        const leftPrice = typeof left.price === 'number' ? left.price : Number.POSITIVE_INFINITY;
+        const rightPrice = typeof right.price === 'number' ? right.price : Number.POSITIVE_INFINITY;
+        return leftPrice - rightPrice;
+      });
+    }
+
+    if (priceSort === 'price-high-low') {
+      return nextItems.sort((left, right) => {
+        const leftPrice = typeof left.price === 'number' ? left.price : Number.NEGATIVE_INFINITY;
+        const rightPrice = typeof right.price === 'number' ? right.price : Number.NEGATIVE_INFINITY;
+        return rightPrice - leftPrice;
+      });
+    }
+
+    if (priceSort === 'discount-low-high') {
+      return nextItems.sort((left, right) => getSortableDiscount(left) - getSortableDiscount(right));
+    }
+
+    if (priceSort === 'discount-high-low') {
+      return nextItems.sort((left, right) => getSortableDiscount(right) - getSortableDiscount(left));
+    }
+
+    return nextItems;
+  };
+
+  const sortedCatalog = useMemo(() => sortItems(catalog), [catalog, priceSort]);
+  const sortedSimilarItems = useMemo(() => sortItems(similarItems), [priceSort, similarItems]);
+  const sortedRecommendations = useMemo(() => sortItems(recommendations), [priceSort, recommendations]);
+
+  const priceRangeLabel = useMemo(() => {
+    const [minPrice, maxPrice] = priceRange;
+    return `$${minPrice} - $${maxPrice}`;
+  }, [priceRange]);
 
   useEffect(() => {
     if (!launchContext) return;
@@ -135,14 +193,8 @@ export function Discovery({ analyzedItem, onAddToCart, launchContext, onLaunchCo
         if (searchQuery.trim()) params.q = searchQuery.trim();
         if (currentCategory) params.category = currentCategory;
 
-        if (priceFilter === 'budget') {
-          params.maxPrice = 49;
-        } else if (priceFilter === 'mid-range') {
-          params.minPrice = 50;
-          params.maxPrice = 149;
-        } else if (priceFilter === 'premium') {
-          params.minPrice = 150;
-        }
+        if (appliedPriceRange[0] > DEFAULT_PRICE_RANGE[0]) params.minPrice = appliedPriceRange[0];
+        if (appliedPriceRange[1] < DEFAULT_PRICE_RANGE[1]) params.maxPrice = appliedPriceRange[1];
 
         const response = await itemsAPI.getCatalog(params);
         setCatalog(response.data.items || []);
@@ -157,7 +209,7 @@ export function Discovery({ analyzedItem, onAddToCart, launchContext, onLaunchCo
     };
 
     loadCatalog();
-  }, [catalogPage, searchQuery, currentCategory, priceFilter]);
+  }, [catalogPage, searchQuery, currentCategory, appliedPriceRange]);
 
   useEffect(() => {
     if (!pendingSimilarName || catalogLoading) return;
@@ -268,33 +320,407 @@ export function Discovery({ analyzedItem, onAddToCart, launchContext, onLaunchCo
 
   const getImage = (item: CatalogItem) => item.imageUrl || 'https://images.unsplash.com/photo-1523381210434-271e8be1f52b?w=300&h=400&fit=crop';
 
+  const getItemSeed = (item: CatalogItem | RecommendationItem) => {
+    const source = String(item._id || item.name || 'item');
+    return Array.from(source).reduce((total, character) => total + character.charCodeAt(0), 0);
+  };
+
+  const getItemMaterials = (item: any): string[] => {
+    if (Array.isArray(item.materials) && item.materials.length > 0) return item.materials.filter(Boolean);
+    return String(item.material || '')
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean);
+  };
+
+  const getDerivedSustainable = (item: any) => {
+    if (item.sustainable) return item.sustainable;
+
+    const text = [item.material, ...(item.tags || []), ...getItemMaterials(item)].filter(Boolean).join(' ').toLowerCase();
+    return {
+      organic: text.includes('organic'),
+      recycled: text.includes('recycled') || text.includes('upcycled'),
+      local: text.includes('local') || text.includes('made local'),
+    };
+  };
+
+  const getDisplayStyle = (item: any): string => {
+    const preferredTags = ['Night Out', 'Formal', 'Polished', 'Workwear', 'Off Duty', 'Street', 'Classic', 'Minimal', 'Tailored', 'Sport', 'Relaxed', 'Boho', 'Luxe'];
+    const tagMatch = preferredTags.find((tag) => (item.tags || []).includes(tag));
+    return item.style || tagMatch || item.category || 'Styled';
+  };
+
+  const getItemRating = (item: any) => {
+    if (typeof item.rating === 'number') return item.rating;
+    return Number((4.3 + ((getItemSeed(item) % 7) * 0.1)).toFixed(1));
+  };
+
+  const getItemReviews = (item: any) => {
+    if (typeof item.reviews === 'number') return item.reviews;
+    return 120 + (getItemSeed(item) % 320);
+  };
+
+  const getItemDiscount = (item: any) => {
+    if (typeof item.discount === 'number') return item.discount;
+    return 18 + (getItemSeed(item) % 23);
+  };
+
+  const getItemOriginalPrice = (item: any) => {
+    if (typeof item.originalPrice === 'number') return item.originalPrice;
+    if (typeof item.price !== 'number') return undefined;
+    const discount = getItemDiscount(item) / 100;
+    return Math.max(item.price + 10, Math.round(item.price / (1 - discount)));
+  };
+
+  const getSustainabilityIcons = (sustainable: { organic: boolean; recycled: boolean; local: boolean }) => {
+    const icons = [];
+    if (sustainable.organic) icons.push(<Leaf key='organic' className='w-3 h-3 text-green-600' />);
+    if (sustainable.recycled) icons.push(<Recycle key='recycled' className='w-3 h-3 text-blue-600' />);
+    if (sustainable.local) icons.push(<MapPin key='local' className='w-3 h-3 text-purple-600' />);
+    return icons;
+  };
+
+  const buildShopCardItem = (item: any) => {
+    const materials = getItemMaterials(item);
+    const sustainable = getDerivedSustainable(item);
+    const style = getDisplayStyle(item);
+    const rating = getItemRating(item);
+    const reviews = getItemReviews(item);
+    const discount = getItemDiscount(item);
+    const originalPrice = getItemOriginalPrice(item);
+
+    return {
+      ...item,
+      id: item.id || item._id,
+      image: getImage(item),
+      type: item.type || item.category,
+      style,
+      rating,
+      reviews,
+      discount,
+      originalPrice,
+      materials,
+      sustainable,
+      tags: item.tags || [],
+      price: typeof item.price === 'number' ? item.price : 0,
+      brand: getDisplayBrand(item.brand),
+      color: item.color || 'Neutral',
+    };
+  };
+
+  const toggleFavorite = (itemId: string) => {
+    setFavoriteItems((current) => current.includes(itemId) ? current.filter((id) => id !== itemId) : [...current, itemId]);
+  };
+
+  const addToWardrobe = async (item: any) => {
+    try {
+      const response = await itemsAPI.create({
+        name: item.name,
+        category: item.type || item.category,
+        color: item.color,
+        material: item.material || (item.materials || []).join(', '),
+        imageUrl: item.image,
+        tags: item.tags || [],
+        description: item.description,
+        brand: item.brand,
+        price: item.price,
+      });
+
+      const savedItem = response.data;
+      const wardrobeItem = {
+        id: Date.now(),
+        mongoId: savedItem._id,
+        item: savedItem.name,
+        type: savedItem.category,
+        color: savedItem.color || item.color,
+        style: item.style,
+        image: item.image,
+        customTags: savedItem.tags || item.tags || [],
+        brand: getDisplayBrand(savedItem.brand || item.brand),
+        price: savedItem.price || item.price,
+        fabric: savedItem.material || item.material || (item.materials || []).join(', '),
+        materials: item.materials || [],
+        sustainable: item.sustainable,
+        isOwned: false,
+        isFavorite: false,
+        description: savedItem.description || item.description || '',
+        sustainabilityScore: item.sustainabilityScore,
+        brandEthicsScore: item.brandEthicsScore,
+        carbonScore: item.carbonScore,
+      };
+
+      setWardrobe([...wardrobe, wardrobeItem]);
+      toast.success(`${formatItemName(item.name)} saved to wardrobe as a wishlist piece`);
+    } catch (error) {
+      console.error('Failed to save wardrobe item:', error);
+      toast.error('Could not save this item to your wardrobe');
+    }
+  };
+
+  const openItemDetail = (item: any) => {
+    setSelectedItem(buildShopCardItem(item));
+    setShowDetailModal(true);
+  };
+
+  const renderShopCard = (item: any, index: number, variant: 'catalog' | 'similar' | 'recommendation') => {
+    const cardItem = buildShopCardItem(item);
+    const sustainabilityScore = calculateSustainabilityScore({
+      sustainable: cardItem.sustainable,
+      materials: cardItem.materials,
+      tags: cardItem.tags,
+      brand: cardItem.brand,
+      sustainabilityScore: cardItem.sustainabilityScore,
+      brandEthicsScore: cardItem.brandEthicsScore,
+      carbonScore: cardItem.carbonScore,
+    });
+    const sustainabilityHighlights = getSustainabilityHighlights({
+      sustainable: cardItem.sustainable,
+      materials: cardItem.materials,
+      tags: cardItem.tags,
+      brand: cardItem.brand,
+      carbonScore: cardItem.carbonScore,
+    });
+    const cardKey = `${variant}-${cardItem._id || cardItem.id}`;
+
+    return (
+      <motion.div
+        key={cardKey}
+        layout
+        className='min-w-0'
+        initial={{ opacity: 0, scale: 0.9, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.9, y: -20 }}
+        transition={{ duration: 0.4, delay: index * 0.05, layout: { duration: 0.3 } }}
+        whileHover={{ y: -8, transition: { duration: 0.2 } }}
+      >
+        <Card
+          className='h-full cursor-pointer overflow-hidden transition-all duration-300 group hover:shadow-xl'
+          onClick={() => openItemDetail(cardItem)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              openItemDetail(cardItem);
+            }
+          }}
+          role='button'
+          tabIndex={0}
+        >
+          <div className='relative overflow-hidden'>
+            <motion.div whileHover={{ scale: 1.1 }} transition={{ duration: 0.4 }}>
+              <ImageWithFallback src={cardItem.image} alt={cardItem.name} className='w-full h-48 sm:h-56 md:h-64 object-cover' />
+            </motion.div>
+            <div className='absolute top-2 left-2 flex flex-col gap-1'>
+              <motion.div
+                initial={{ x: -20, opacity: 0 }}
+                animate={{ x: 0, opacity: 1 }}
+                transition={{ delay: index * 0.05 + 0.2 }}
+                whileHover={{ scale: 1.1, rotate: -5 }}
+              >
+                <Badge variant='destructive' className='bg-red-500 text-xs shadow-lg'>
+                  -{cardItem.discount}%
+                </Badge>
+              </motion.div>
+              {(cardItem.sustainable.organic || cardItem.sustainable.recycled || cardItem.sustainable.local) && (
+                <motion.div
+                  initial={{ x: -20, opacity: 0 }}
+                  animate={{ x: 0, opacity: 1 }}
+                  transition={{ delay: index * 0.05 + 0.3 }}
+                  whileHover={{ scale: 1.1, rotate: 5 }}
+                >
+                  <Badge variant='secondary' className={`${getSustainabilityBgColor(sustainabilityScore)} text-xs shadow-lg`}>
+                    <Leaf className='w-3 h-3 mr-1' />
+                    {getSustainabilityGrade(sustainabilityScore)}
+                  </Badge>
+                </motion.div>
+              )}
+            </div>
+            <motion.div whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
+              <Button
+                variant='ghost'
+                size='sm'
+                className='absolute top-2 right-2 bg-card/95 hover:bg-card shadow-lg border border-border w-8 h-8 p-0 transition-all duration-200'
+                onClick={(event) => {
+                  event.stopPropagation();
+                  toggleFavorite(String(cardItem.id || cardItem._id));
+                }}
+              >
+                <motion.div
+                  animate={favoriteItems.includes(String(cardItem.id || cardItem._id)) ? { scale: [1, 1.3, 1] } : {}}
+                  transition={{ duration: 0.3 }}
+                >
+                  <Heart className={`w-4 h-4 transition-all duration-300 ${favoriteItems.includes(String(cardItem.id || cardItem._id)) ? 'fill-current text-red-500' : 'text-foreground'}`} />
+                </motion.div>
+              </Button>
+            </motion.div>
+          </div>
+
+          <CardContent className='min-w-0 p-4'>
+            <div className='flex h-full flex-col gap-3'>
+              <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.05 + 0.4 }}>
+                <h3 className='font-semibold line-clamp-1 text-sm md:text-base'>{formatItemName(cardItem.name)}</h3>
+                <p className='text-xs md:text-sm text-muted-foreground'>{cardItem.brand}</p>
+              </motion.div>
+
+              <motion.div className='flex items-start justify-between gap-3' initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: index * 0.05 + 0.5 }}>
+                <div className='flex min-w-0 flex-wrap items-center gap-1'>
+                  <Star className='w-3 h-3 md:w-4 md:h-4 fill-current text-yellow-400' />
+                  <span className='text-xs md:text-sm font-medium'>{cardItem.rating}</span>
+                  <span className='text-xs text-muted-foreground'>({cardItem.reviews})</span>
+                </div>
+                <div className='shrink-0 text-right'>
+                  <p className='font-bold text-sm md:text-lg text-green-600'>${cardItem.price}</p>
+                  {cardItem.originalPrice && <p className='text-xs md:text-sm text-muted-foreground line-through'>${cardItem.originalPrice}</p>}
+                </div>
+              </motion.div>
+
+              <motion.div className='rounded-xl border border-border/60 bg-muted/30 p-3' initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: index * 0.05 + 0.6 }}>
+                <div className='flex items-center gap-1.5 flex-wrap'>
+                  <span className='text-xs text-muted-foreground'>Sustainability:</span>
+                  <Badge className={getSustainabilityBgColor(sustainabilityScore)}>{sustainabilityScore}/100</Badge>
+                  {getSustainabilityIcons(cardItem.sustainable)}
+                  {cardItem.sustainable.organic && (
+                    <Badge variant='secondary' className='text-xs bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 border border-green-200 dark:border-green-800'>
+                      Organic
+                    </Badge>
+                  )}
+                  {cardItem.sustainable.recycled && (
+                    <Badge variant='secondary' className='text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800'>
+                      Recycled
+                    </Badge>
+                  )}
+                  {cardItem.sustainable.local && (
+                    <Badge variant='secondary' className='text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300 border border-purple-200 dark:border-purple-800'>
+                      Local
+                    </Badge>
+                  )}
+                  {sustainabilityHighlights.slice(0, 1).map((highlight) => (
+                    <Badge key={`${cardKey}-${highlight}`} variant='outline' className='text-xs'>{highlight}</Badge>
+                  ))}
+                </div>
+
+                <div className='mt-2 text-xs leading-relaxed text-muted-foreground line-clamp-2'>
+                  <span className='font-medium'>Materials:</span> {cardItem.materials.length > 0 ? cardItem.materials.join(', ') : 'Curated fabric blend'}
+                </div>
+              </motion.div>
+
+              <motion.div className='flex items-center gap-1.5 flex-wrap' initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: index * 0.05 + 0.8 }}>
+                <Badge variant='outline' className='text-xs hover:bg-accent transition-colors'>
+                  {cardItem.style}
+                </Badge>
+                <Badge variant='outline' className='text-xs hover:bg-accent transition-colors'>
+                  {cardItem.color}
+                </Badge>
+                {cardItem.tags.slice(0, 1).map((tag: string) => (
+                  <Badge key={`${cardKey}-${tag}`} variant='secondary' className='text-xs hover:scale-105 transition-transform'>
+                    <Tag className='w-3 h-3 mr-1' />
+                    {tag}
+                  </Badge>
+                ))}
+              </motion.div>
+
+              <motion.div className='mt-auto grid grid-cols-1 gap-2 pt-1 sm:grid-cols-2' initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.05 + 0.9 }}>
+                <motion.div className='h-14 flex-1' whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                  <Button
+                    size='sm'
+                    className='!h-full w-full px-3 py-2 text-center text-sm transition-all duration-200 hover:shadow-md'
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      openItemDetail(cardItem);
+                    }}
+                  >
+                    <ShoppingCart className='w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2' />
+                    Buy Now
+                  </Button>
+                </motion.div>
+                <motion.div className='h-14 flex-1' whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                  <Button
+                    variant='outline'
+                    size='sm'
+                    className='!h-full w-full px-3 py-2 text-center text-sm transition-all duration-200 hover:shadow-md'
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void addToWardrobe(cardItem);
+                    }}
+                  >
+                    <Plus className='w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2' />
+                    Save to Wardrobe
+                  </Button>
+                </motion.div>
+                <motion.div className='sm:col-span-2' whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }}>
+                  <Button
+                    variant='secondary'
+                    size='sm'
+                    className='h-11 w-full px-3 py-2 text-center text-sm'
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      selectBaseItem(cardItem);
+                    }}
+                  >
+                    <ArrowLeftRight className='w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2' />
+                    Similar Styles
+                  </Button>
+                </motion.div>
+              </motion.div>
+            </div>
+          </CardContent>
+        </Card>
+      </motion.div>
+    );
+  };
+
   const renderPagination = (
     page: number,
     totalPages: number,
     onPageChange: (page: number) => void
-  ) => (
-    <div className='flex items-center justify-center gap-2 pt-4'>
-      <Button variant='outline' size='sm' disabled={page <= 1} onClick={() => onPageChange(page - 1)}>
-        <ChevronLeft className='w-4 h-4' />
-      </Button>
-      <div className='flex items-center gap-1'>
-        {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => i + 1).map((p) => (
-          <Button
-            key={p}
-            variant={p === page ? 'default' : 'outline'}
-            size='sm'
-            onClick={() => onPageChange(p)}
-            className='min-w-9'
-          >
-            {p}
-          </Button>
-        ))}
+  ) => {
+    const visibleWindow = 7;
+    const halfWindow = Math.floor(visibleWindow / 2);
+    const startPage = Math.max(1, Math.min(page - halfWindow, totalPages - visibleWindow + 1));
+    const endPage = Math.min(totalPages, startPage + visibleWindow - 1);
+    const visiblePages = Array.from({ length: Math.max(endPage - startPage + 1, 0) }, (_, index) => startPage + index);
+
+    return (
+      <div className='flex items-center justify-center gap-2 pt-4'>
+        <Button variant='outline' size='sm' disabled={page <= 1} onClick={() => onPageChange(page - 1)}>
+          <ChevronLeft className='w-4 h-4' />
+        </Button>
+
+        {startPage > 1 && (
+          <>
+            <Button variant='outline' size='sm' onClick={() => onPageChange(1)} className='min-w-9'>1</Button>
+            {startPage > 2 && <span className='px-1 text-sm text-muted-foreground'>...</span>}
+          </>
+        )}
+
+        <div className='flex items-center gap-1'>
+          {visiblePages.map((p) => (
+            <Button
+              key={p}
+              variant={p === page ? 'default' : 'outline'}
+              size='sm'
+              onClick={() => onPageChange(p)}
+              className='min-w-9'
+            >
+              {p}
+            </Button>
+          ))}
+        </div>
+
+        {endPage < totalPages && (
+          <>
+            {endPage < totalPages - 1 && <span className='px-1 text-sm text-muted-foreground'>...</span>}
+            <Button variant='outline' size='sm' onClick={() => onPageChange(totalPages)} className='min-w-9'>
+              {totalPages}
+            </Button>
+          </>
+        )}
+
+        <Button variant='outline' size='sm' disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>
+          <ChevronRight className='w-4 h-4' />
+        </Button>
       </div>
-      <Button variant='outline' size='sm' disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>
-        <ChevronRight className='w-4 h-4' />
-      </Button>
-    </div>
-  );
+    );
+  };
 
   return (
     <div className='space-y-6'>
@@ -309,7 +735,7 @@ export function Discovery({ analyzedItem, onAddToCart, launchContext, onLaunchCo
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className='grid grid-cols-1 gap-4 mb-4 md:grid-cols-2 xl:grid-cols-6'>
+          <div className='grid grid-cols-1 gap-4 mb-4 md:grid-cols-2 xl:grid-cols-7'>
             <div className='flex min-w-0 items-center gap-2 md:col-span-2'>
               <Filter className='w-4 h-4' />
               <Input
@@ -323,17 +749,27 @@ export function Discovery({ analyzedItem, onAddToCart, launchContext, onLaunchCo
               />
             </div>
 
-            <Select value={priceFilter} onValueChange={(value) => { setCatalogPage(1); setPriceFilter(value); }}>
-              <SelectTrigger className='w-full'>
-                <SelectValue placeholder='Price' />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value='all'>All Prices</SelectItem>
-                <SelectItem value='budget'>Budget</SelectItem>
-                <SelectItem value='mid-range'>Mid-range</SelectItem>
-                <SelectItem value='premium'>Premium</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className='flex min-w-0 flex-col gap-2 xl:col-span-2'>
+              <div className='flex items-center justify-between text-sm text-muted-foreground'>
+                <span>Price</span>
+                <span>{priceRangeLabel}</span>
+              </div>
+              <Slider
+                min={DEFAULT_PRICE_RANGE[0]}
+                max={DEFAULT_PRICE_RANGE[1]}
+                step={10}
+                value={priceRange}
+                onValueChange={(value) => {
+                  if (value.length !== 2) return;
+                  setPriceRange([value[0], value[1]]);
+                }}
+                onValueCommit={(value) => {
+                  if (value.length !== 2) return;
+                  setCatalogPage(1);
+                  setAppliedPriceRange([value[0], value[1]]);
+                }}
+              />
+            </div>
 
             <Select value={categoryFilter} onValueChange={(value) => { setCatalogPage(1); setCategoryFilter(value); }}>
               <SelectTrigger className='w-full'>
@@ -349,27 +785,16 @@ export function Discovery({ analyzedItem, onAddToCart, launchContext, onLaunchCo
               </SelectContent>
             </Select>
 
-            <Select value={weather} onValueChange={setWeather}>
+            <Select value={priceSort} onValueChange={setPriceSort}>
               <SelectTrigger className='w-full'>
-                <SelectValue placeholder='Weather' />
+                <SelectValue placeholder='Sort By' />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value='cold'>Cold</SelectItem>
-                <SelectItem value='mild'>Mild</SelectItem>
-                <SelectItem value='warm'>Warm</SelectItem>
-                <SelectItem value='rainy'>Rainy</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Select value={occasion} onValueChange={setOccasion}>
-              <SelectTrigger className='w-full'>
-                <SelectValue placeholder='Occasion' />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value='casual'>Casual</SelectItem>
-                <SelectItem value='work'>Work</SelectItem>
-                <SelectItem value='evening'>Evening</SelectItem>
-                <SelectItem value='formal'>Formal</SelectItem>
+                <SelectItem value='featured'>Sort By</SelectItem>
+                <SelectItem value='price-low-high'>Price: Low to High</SelectItem>
+                <SelectItem value='price-high-low'>Price: High to Low</SelectItem>
+                <SelectItem value='discount-low-high'>Discount: Low to High</SelectItem>
+                <SelectItem value='discount-high-low'>Discount: High to Low</SelectItem>
               </SelectContent>
             </Select>
 
@@ -421,53 +846,11 @@ export function Discovery({ analyzedItem, onAddToCart, launchContext, onLaunchCo
             <p className='text-muted-foreground'>No catalog items found for this filter.</p>
           ) : (
             <>
-              <div className='grid md:grid-cols-2 lg:grid-cols-3 gap-6'>
-                {catalog.map((item) => (
-                  <Card key={item._id} className='overflow-hidden min-w-0'>
-                    <ImageWithFallback src={getImage(item)} alt={item.name} className='w-full h-52 object-cover' />
-                    <CardContent className='p-4 space-y-3 min-w-0'>
-                      <div className='flex items-start justify-between gap-3'>
-                        <div className='min-w-0'>
-                          <h3 className='font-medium line-clamp-1'>{item.name}</h3>
-                          <p className='text-sm text-muted-foreground'>{getDisplayBrand(item.brand)}</p>
-                        </div>
-                        <div className='shrink-0 text-right'>
-                          <p className='font-medium'>${item.price ?? 'N/A'}</p>
-                          <Badge variant='outline'>{getPriceTier(item.price)}</Badge>
-                        </div>
-                      </div>
-
-                      <div className='flex flex-wrap gap-1'>
-                        <Badge variant='secondary'>{item.category}</Badge>
-                        {typeof item.sustainabilityScore === 'number' && (
-                          <Badge className={getSustainabilityBgColor(Math.round(item.sustainabilityScore * 100))}>
-                            <Leaf className='w-3 h-3 mr-1' />
-                            {getSustainabilityGrade(Math.round(item.sustainabilityScore * 100))}
-                          </Badge>
-                        )}
-                        {(item.tags || []).slice(0, 3).map((tag) => (
-                          <Badge key={`${item._id}-${tag}`} variant='outline'>{tag}</Badge>
-                        ))}
-                      </div>
-
-                      {item.description && (
-                        <p className='text-sm text-muted-foreground line-clamp-2'>{item.description}</p>
-                      )}
-
-                      <div className='flex flex-col gap-2 sm:flex-row'>
-                        <Button className='flex-1' size='sm' onClick={() => onAddToCart({ ...item, image: getImage(item) })}>
-                          <ShoppingCart className='w-4 h-4 mr-1' />
-                          Add to Cart
-                        </Button>
-                        <Button variant='outline' size='sm' onClick={() => selectBaseItem(item)}>
-                          <ArrowLeftRight className='w-4 h-4 mr-1' />
-                          Similar
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
+              <motion.div layout className='grid md:grid-cols-2 lg:grid-cols-3 gap-6'>
+                <AnimatePresence mode='popLayout'>
+                  {sortedCatalog.map((item, index) => renderShopCard(item, index, 'catalog'))}
+                </AnimatePresence>
+              </motion.div>
               {renderPagination(catalogPage, catalogTotalPages, setCatalogPage)}
             </>
           )}
@@ -481,53 +864,21 @@ export function Discovery({ analyzedItem, onAddToCart, launchContext, onLaunchCo
               <Alert>
                 <Search className='h-4 w-4' />
                 <AlertDescription>
-                  Showing items similar to: {selectedBaseItem.name}
+                  Showing items similar to: {formatItemName(selectedBaseItem.name)}
                 </AlertDescription>
               </Alert>
 
-              <div className='mt-4 grid md:grid-cols-2 lg:grid-cols-3 gap-6'>
+              <motion.div layout className='mt-4 grid md:grid-cols-2 lg:grid-cols-3 gap-6'>
                 {similarLoading ? (
                   <p className='text-muted-foreground'>Loading similar items...</p>
                 ) : similarItems.length === 0 ? (
                   <p className='text-muted-foreground'>No similar items found.</p>
                 ) : (
-                  similarItems.map((item) => (
-                    <Card key={item._id} className='overflow-hidden min-w-0'>
-                      <ImageWithFallback src={getImage(item)} alt={item.name} className='w-full h-52 object-cover' />
-                      <CardContent className='p-4 space-y-3 min-w-0'>
-                        <div className='flex items-start justify-between gap-3'>
-                          <div className='min-w-0'>
-                            <h3 className='font-medium line-clamp-1'>{item.name}</h3>
-                            <p className='text-sm text-muted-foreground'>{getDisplayBrand(item.brand)}</p>
-                          </div>
-                          <p className='shrink-0 font-medium'>${item.price ?? 'N/A'}</p>
-                        </div>
-
-                        <div className='flex items-center gap-2'>
-                          <Badge variant='secondary'>{item.category}</Badge>
-                          <Badge variant='outline'>Match {(item.similarity ?? 0).toFixed(2)}</Badge>
-                          {typeof item.sustainabilityScore === 'number' && (
-                            <Badge className={getSustainabilityBgColor(Math.round(item.sustainabilityScore * 100))}>
-                              {getSustainabilityGrade(Math.round(item.sustainabilityScore * 100))}
-                            </Badge>
-                          )}
-                        </div>
-
-                        <div className='flex flex-wrap gap-1'>
-                          {(item.tags || []).slice(0, 4).map((tag) => (
-                            <Badge key={`${item._id}-sim-${tag}`} variant='outline'>{tag}</Badge>
-                          ))}
-                        </div>
-
-                        <Button size='sm' onClick={() => onAddToCart({ ...item, image: getImage(item) })}>
-                          <ShoppingCart className='w-4 h-4 mr-1' />
-                          Add to Cart
-                        </Button>
-                      </CardContent>
-                    </Card>
-                  ))
+                  <AnimatePresence mode='popLayout'>
+                    {sortedSimilarItems.map((item, index) => renderShopCard(item, index, 'similar'))}
+                  </AnimatePresence>
                 )}
-              </div>
+              </motion.div>
 
               {renderPagination(similarPage, similarTotalPages, setSimilarPage)}
             </>
@@ -547,61 +898,31 @@ export function Discovery({ analyzedItem, onAddToCart, launchContext, onLaunchCo
           ) : recommendations.length === 0 ? (
             <p className='text-muted-foreground'>No recommendations available yet. Interact with catalog items to train the recommender.</p>
           ) : (
-            <div className='grid md:grid-cols-2 lg:grid-cols-3 gap-6'>
-              {recommendations.map((item) => (
-                <Card key={`rec-${item._id}`} className='overflow-hidden min-w-0'>
-                  <ImageWithFallback src={getImage(item)} alt={item.name} className='w-full h-48 object-cover' />
-                  <CardContent className='p-4 space-y-3 min-w-0'>
-                    <div className='flex items-start justify-between gap-3'>
-                      <div className='min-w-0'>
-                        <h3 className='font-medium line-clamp-1'>{item.name}</h3>
-                        <p className='text-sm text-muted-foreground'>{getDisplayBrand(item.brand)}</p>
-                      </div>
-                      <Badge className='shrink-0'>Score {item.score.toFixed(2)}</Badge>
-                    </div>
-
-                    <div className='flex flex-wrap gap-1'>
-                      <Badge variant='secondary'>{item.category}</Badge>
-                      <Badge variant='outline'>Style {(item.scoreBreakdown.behaviourMatch * 100).toFixed(0)}%</Badge>
-                      <Badge variant='outline'>Wardrobe {(item.scoreBreakdown.wardrobeCompatibility * 100).toFixed(0)}%</Badge>
-                      <Badge variant='outline' className='flex items-center gap-1'>
-                        <Leaf className='w-3 h-3' />
-                        {(item.sustainabilityScore ?? item.scoreBreakdown.sustainabilityBoost).toFixed(2)}
-                      </Badge>
-                    </div>
-
-                    <div className='space-y-1'>
-                      {item.reasons.map((reason) => (
-                        <p key={`${item._id}-${reason}`} className='text-sm text-muted-foreground'>
-                          {reason}
-                        </p>
-                      ))}
-                    </div>
-
-                    <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
-                      <p className='font-medium'>${item.price ?? 'N/A'}</p>
-                      <div className='flex flex-wrap gap-2'>
-                        <Button variant='outline' size='sm' onClick={() => likeRecommendation(item._id)}>
-                          <Heart className='w-4 h-4 mr-1' />
-                          Like
-                        </Button>
-                        <Button variant='outline' size='sm' onClick={() => onAddToCart({ ...item, image: getImage(item) })}>
-                          <ShoppingCart className='w-4 h-4 mr-1' />
-                          Cart
-                        </Button>
-                        <Button size='sm' onClick={() => selectBaseItem(item)}>
-                          <ArrowLeftRight className='w-4 h-4 mr-1' />
-                          Similar
-                        </Button>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+            <motion.div layout className='grid md:grid-cols-2 lg:grid-cols-3 gap-6'>
+              <AnimatePresence mode='popLayout'>
+                {sortedRecommendations.map((item, index) => renderShopCard(item, index, 'recommendation'))}
+              </AnimatePresence>
+            </motion.div>
           )}
         </TabsContent>
       </Tabs>
+
+      <ItemDetailModal
+        item={selectedItem}
+        isOpen={showDetailModal}
+        onClose={() => setShowDetailModal(false)}
+        onAddToWardrobe={(item) => {
+          void addToWardrobe(item);
+        }}
+        onAddToCart={onAddToCart}
+        onViewSimilar={(item) => {
+          if ('_id' in item) {
+            selectBaseItem(item as CatalogItem);
+          }
+        }}
+        onToggleFavorite={(itemId) => toggleFavorite(String(itemId))}
+        isFavorite={selectedItem ? favoriteItems.includes(String(selectedItem.id || selectedItem._id)) : false}
+      />
     </div>
   );
 }

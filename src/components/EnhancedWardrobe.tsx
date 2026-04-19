@@ -4,19 +4,57 @@ import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { Separator } from "./ui/separator";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "./ui/dialog";
 import { Label } from "./ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Textarea } from "./ui/textarea";
 import { ImageWithFallback } from './errors/ImageWithFallback';
 import { 
-  Package, Plus, Trash2, Edit3, CheckCircle, XCircle, Shirt, Filter, Tag, 
-  Folders, Grid3X3, List, Heart, Star, ShoppingBag, Eye, Sparkles, LayoutGrid,
+  Package, Plus, Trash2, CheckCircle, Tag,
+  Grid3X3, List, Heart, ShoppingBag, Eye, Sparkles,
   Upload, X, ImageIcon
 } from "lucide-react";
 import { itemsAPI } from '../services/api';
-import { Alert, AlertDescription } from "./ui/alert";
+
+const BUILT_IN_TYPE_OPTIONS = [
+  { value: 'Top', label: 'Tops' },
+  { value: 'Bottom', label: 'Bottoms' },
+  { value: 'Dress', label: 'Dresses' },
+  { value: 'Outerwear', label: 'Outerwear' },
+  { value: 'Shoes', label: 'Shoes' },
+  { value: 'Accessory', label: 'Accessories' },
+] as const;
+
+function normalizeClothingType(type?: string, itemName?: string): string {
+  const value = `${type || ''} ${itemName || ''}`.trim().toLowerCase();
+  if (!value) return '';
+
+  if (/(dress|jumpsuit|gown)/.test(value)) return 'Dress';
+  if (/(jacket|coat|blazer|hoodie|cardigan|sweater|outerwear)/.test(value)) return 'Outerwear';
+  if (/(shoe|shoes|boot|boots|sneaker|sneakers|heel|heels|loafer|loafers|sandal|sandals)/.test(value)) return 'Shoes';
+  if (/(pant|pants|trouser|trousers|jean|jeans|short|shorts|skirt|leggings|bottom)/.test(value)) return 'Bottom';
+  if (/(bag|belt|hat|cap|scarf|glove|gloves|sock|socks|jewelry|jewellery|watch|accessory)/.test(value)) return 'Accessory';
+  if (/(shirt|tee|t-shirt|tshirt|blouse|top|tank|polo)/.test(value)) return 'Top';
+
+  return '';
+}
+
+function uniqueTagValues(values: Array<string | undefined | null>): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const value of values) {
+    const trimmed = String(value || '').trim();
+    if (!trimmed) continue;
+
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+
+    seen.add(key);
+    result.push(trimmed);
+  }
+
+  return result;
+}
 
 function getImageUrlFromResponse(data: any): string {
   if (typeof data?.imageUrl === 'string' && data.imageUrl.trim()) return data.imageUrl;
@@ -52,13 +90,11 @@ interface ClothingItem {
 interface EnhancedWardrobeProps {
   wardrobe: ClothingItem[];
   setWardrobe: (wardrobe: ClothingItem[]) => void;
-  wardrobes: any[];
-  setWardrobes: (wardrobes: any[]) => void;
-  analyzedItem: any;
-  onShopSuggestion: (context: { query?: string; category?: string }) => void;
+  onAddToCart: (item: any) => void;
+  onDiscoverSuggestion: (context: { query?: string; category?: string }) => void;
 }
 
-export function EnhancedWardrobe({ wardrobe, setWardrobe, wardrobes, setWardrobes, analyzedItem, onShopSuggestion }: EnhancedWardrobeProps) {
+export function EnhancedWardrobe({ wardrobe, setWardrobe, onAddToCart, onDiscoverSuggestion }: EnhancedWardrobeProps) {
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
@@ -67,7 +103,6 @@ export function EnhancedWardrobe({ wardrobe, setWardrobe, wardrobes, setWardrobe
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showDetailDialog, setShowDetailDialog] = useState(false);
   const [selectedItem, setSelectedItem] = useState<ClothingItem | null>(null);
-  const [editingItem, setEditingItem] = useState<ClothingItem | null>(null);
   const [itemTagInput, setItemTagInput] = useState('');
   const [newItem, setNewItem] = useState<Partial<ClothingItem>>({
     item: '',
@@ -88,7 +123,7 @@ export function EnhancedWardrobe({ wardrobe, setWardrobe, wardrobes, setWardrobe
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
   const [styleFilter, setStyleFilter] = useState('all');
-  const [colorFilter, setColorFilter] = useState('all');
+  const colorFilter = 'all';
   const [tagFilter, setTagFilter] = useState('all');
   const [brandFilter, setBrandFilter] = useState('all');
   const [showFilter, setShowFilter] = useState('all'); // 'all', 'owned', 'favorites'
@@ -100,10 +135,13 @@ export function EnhancedWardrobe({ wardrobe, setWardrobe, wardrobes, setWardrobe
     'Shoes', 'Jackets', 'Streetwear', 'Formal', 'Casual', 'Vintage', 'Designer'
   ]);
 
+  const getDisplayTags = useCallback((item: ClothingItem) => uniqueTagValues(item.customTags || []), []);
+
   // Tag management
   const addNewTag = () => {
-    if (newTag.trim() && !availableTags.includes(newTag.trim())) {
-      setAvailableTags([...availableTags, newTag.trim()]);
+    const trimmedTag = newTag.trim();
+    if (trimmedTag && !availableTags.some((tag) => tag.toLowerCase() === trimmedTag.toLowerCase())) {
+      setAvailableTags([...availableTags, trimmedTag]);
       setNewTag('');
     }
   };
@@ -205,15 +243,25 @@ export function EnhancedWardrobe({ wardrobe, setWardrobe, wardrobes, setWardrobe
   };
 
   const toggleFavorite = (id: number) => {
-    setWardrobe(wardrobe.map(item => 
+    const nextWardrobe = wardrobe.map(item => 
       item.id === id ? { ...item, isFavorite: !item.isFavorite } : item
-    ));
+    );
+    setWardrobe(nextWardrobe);
+    if (selectedItem?.id === id) {
+      const nextSelectedItem = nextWardrobe.find((item) => item.id === id) || null;
+      setSelectedItem(nextSelectedItem);
+    }
   };
 
   const toggleOwned = (id: number) => {
-    setWardrobe(wardrobe.map(item => 
+    const nextWardrobe = wardrobe.map(item => 
       item.id === id ? { ...item, isOwned: !item.isOwned } : item
-    ));
+    );
+    setWardrobe(nextWardrobe);
+    if (selectedItem?.id === id) {
+      const nextSelectedItem = nextWardrobe.find((item) => item.id === id) || null;
+      setSelectedItem(nextSelectedItem);
+    }
   };
 
   const removeItemFromWardrobe = async (id: number) => {
@@ -232,21 +280,23 @@ export function EnhancedWardrobe({ wardrobe, setWardrobe, wardrobes, setWardrobe
     if (!tag.trim()) return;
     const trimmedTag = tag.trim();
     const currentItem = wardrobe.find((item) => item.id === itemId);
-    if (!currentItem || (currentItem.customTags || []).includes(trimmedTag)) return;
+    if (!currentItem || (currentItem.customTags || []).some((value) => value.toLowerCase() === trimmedTag.toLowerCase())) return;
+
+    const nextTags = uniqueTagValues([...(currentItem.customTags || []), trimmedTag]);
 
     const nextWardrobe = wardrobe.map(item => 
       item.id === itemId 
-        ? { ...item, customTags: [...(item.customTags || []), trimmedTag] }
+        ? { ...item, customTags: nextTags }
         : item
     );
     setWardrobe(nextWardrobe);
 
     if (selectedItem?.id === itemId) {
-      setSelectedItem({ ...selectedItem, customTags: [...(selectedItem.customTags || []), trimmedTag] });
+      setSelectedItem({ ...selectedItem, customTags: nextTags });
     }
 
     if (currentItem.mongoId) {
-      void itemsAPI.update(currentItem.mongoId, { tags: [...(currentItem.customTags || []), trimmedTag] }).catch((error) => {
+      void itemsAPI.update(currentItem.mongoId, { tags: nextTags }).catch((error) => {
         console.warn('Failed to persist wardrobe tags:', error);
       });
     }
@@ -275,10 +325,6 @@ export function EnhancedWardrobe({ wardrobe, setWardrobe, wardrobes, setWardrobe
 
   // Smart suggestions based on wardrobe
   const getSmartSuggestions = useMemo(() => {
-    const ownedColors = [...new Set(wardrobe.filter(item => item.isOwned).map(item => item.color))];
-    const ownedStyles = [...new Set(wardrobe.filter(item => item.isOwned).map(item => item.style))];
-    const ownedTags = [...new Set(wardrobe.filter(item => item.isOwned).flatMap(item => item.customTags || []))];
-    
     // Mock suggestions based on analysis
     return [
       { name: "Navy Blazer", reason: "Complements your grey hoodie", type: "Outerwear" },
@@ -297,7 +343,7 @@ export function EnhancedWardrobe({ wardrobe, setWardrobe, wardrobes, setWardrobe
       }
       
       // Type filter
-      if (typeFilter !== 'all' && item.type !== typeFilter) return false;
+      if (typeFilter !== 'all' && normalizeClothingType(item.type, item.item) !== typeFilter) return false;
       
       // Style filter
       if (styleFilter !== 'all' && item.style !== styleFilter) return false;
@@ -636,8 +682,8 @@ export function EnhancedWardrobe({ wardrobe, setWardrobe, wardrobes, setWardrobe
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Types</SelectItem>
-                  {getUniqueValues('type').map(type => (
-                    <SelectItem key={type} value={type}>{type}s</SelectItem>
+                  {BUILT_IN_TYPE_OPTIONS.map(type => (
+                    <SelectItem key={type.value} value={type.value}>{type.label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -741,9 +787,9 @@ export function EnhancedWardrobe({ wardrobe, setWardrobe, wardrobes, setWardrobe
                   </div>
                   <div className="flex items-center gap-2">
                     <Badge variant="outline">{suggestion.type}</Badge>
-                    <Button size="sm" variant="outline" onClick={() => onShopSuggestion({ query: suggestion.name, category: suggestion.type.toLowerCase() })}>
+                    <Button size="sm" variant="outline" onClick={() => onDiscoverSuggestion({ query: suggestion.name, category: suggestion.type })}>
                       <ShoppingBag className="w-4 h-4 mr-1" />
-                      Shop
+                      Discover
                     </Button>
                   </div>
                 </div>
@@ -834,8 +880,11 @@ export function EnhancedWardrobe({ wardrobe, setWardrobe, wardrobes, setWardrobe
                       
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-1">
-                          <Badge variant="outline" className="text-xs">{item.style}</Badge>
-                          <Badge variant="outline" className="text-xs">{item.color}</Badge>
+                          {normalizeClothingType(item.type, item.item) && (
+                            <Badge variant="outline" className="text-xs">{normalizeClothingType(item.type, item.item)}</Badge>
+                          )}
+                          {item.style && <Badge variant="outline" className="text-xs">{item.style}</Badge>}
+                          {item.color && <Badge variant="outline" className="text-xs">{item.color}</Badge>}
                         </div>
                         {item.price && item.price > 0 && (
                           <span className="font-semibold text-green-600">${item.price}</span>
@@ -843,20 +892,30 @@ export function EnhancedWardrobe({ wardrobe, setWardrobe, wardrobes, setWardrobe
                       </div>
 
                       <div className="flex items-center gap-1 flex-wrap">
-                        {(item.customTags || []).slice(0, 2).map((tag, index) => (
+                        {getDisplayTags(item).slice(0, 2).map((tag, index) => (
                           <Badge key={index} variant="secondary" className="text-xs">
                             <Tag className="w-3 h-3 mr-1" />
                             {tag}
                           </Badge>
                         ))}
-                        {(item.customTags || []).length > 2 && (
+                        {getDisplayTags(item).length > 2 && (
                           <Badge variant="secondary" className="text-xs">
-                            +{(item.customTags || []).length - 2}
+                            +{getDisplayTags(item).length - 2}
                           </Badge>
                         )}
                       </div>
 
                       <div className="flex gap-2 pt-2">
+                        {!item.isOwned && (
+                          <Button
+                            size="sm"
+                            className="flex-1"
+                            onClick={() => onAddToCart(item)}
+                          >
+                            <ShoppingBag className="w-4 h-4 mr-1" />
+                            Add to Cart
+                          </Button>
+                        )}
                         <Button 
                           size="sm" 
                           variant="outline" 
@@ -900,9 +959,9 @@ export function EnhancedWardrobe({ wardrobe, setWardrobe, wardrobes, setWardrobe
                             <h3 className="font-semibold">{item.item}</h3>
                             <div className="flex items-center gap-2 mt-1">
                               {item.brand && <span className="text-sm text-muted-foreground">{item.brand}</span>}
-                              <Badge variant="outline" className="text-xs">{item.type}</Badge>
-                              <Badge variant="outline" className="text-xs">{item.style}</Badge>
-                              <Badge variant="outline" className="text-xs">{item.color}</Badge>
+                              {normalizeClothingType(item.type, item.item) && <Badge variant="outline" className="text-xs">{normalizeClothingType(item.type, item.item)}</Badge>}
+                              {item.style && <Badge variant="outline" className="text-xs">{item.style}</Badge>}
+                              {item.color && <Badge variant="outline" className="text-xs">{item.color}</Badge>}
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
@@ -943,7 +1002,7 @@ export function EnhancedWardrobe({ wardrobe, setWardrobe, wardrobes, setWardrobe
                         </div>
                         
                         <div className="flex items-center gap-1 flex-wrap mt-2">
-                          {(item.customTags || []).map((tag, index) => (
+                          {getDisplayTags(item).map((tag, index) => (
                             <Badge key={index} variant="secondary" className="text-xs">
                               <Tag className="w-3 h-3 mr-1" />
                               {tag}
@@ -1017,7 +1076,8 @@ export function EnhancedWardrobe({ wardrobe, setWardrobe, wardrobes, setWardrobe
                 </DialogTitle>
                 <DialogDescription>
                   {selectedItem.brand && `${selectedItem.brand} • `}
-                  {selectedItem.type} • {selectedItem.style}
+                  {normalizeClothingType(selectedItem.type, selectedItem.item) || selectedItem.type || 'Item'}
+                  {selectedItem.style ? ` • ${selectedItem.style}` : ''}
                 </DialogDescription>
               </DialogHeader>
               
@@ -1033,14 +1093,15 @@ export function EnhancedWardrobe({ wardrobe, setWardrobe, wardrobes, setWardrobe
                 <div className="space-y-4">
                   <div>
                     <h4 className="font-medium mb-2">Details</h4>
-                    <div className="space-y-1 text-sm">
-                      <div><span className="font-medium">Color:</span> {selectedItem.color}</div>
-                      <div><span className="font-medium">Style:</span> {selectedItem.style}</div>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex items-start gap-2"><span className="font-medium min-w-14">Type:</span><span>{normalizeClothingType(selectedItem.type, selectedItem.item) || selectedItem.type || 'Uncategorized'}</span></div>
+                      <div className="flex items-start gap-2"><span className="font-medium min-w-14">Color:</span><span>{selectedItem.color || 'Unknown'}</span></div>
+                      <div className="flex items-start gap-2"><span className="font-medium min-w-14">Style:</span><span>{selectedItem.style || 'None'}</span></div>
                       {selectedItem.fabric && (
-                        <div><span className="font-medium">Fabric:</span> {selectedItem.fabric}</div>
+                        <div className="flex items-start gap-2"><span className="font-medium min-w-14">Fabric:</span><span>{selectedItem.fabric}</span></div>
                       )}
                       {selectedItem.price && selectedItem.price > 0 && (
-                        <div><span className="font-medium">Price:</span> ${selectedItem.price}</div>
+                        <div className="flex items-start gap-2"><span className="font-medium min-w-14">Price:</span><span>${selectedItem.price}</span></div>
                       )}
                     </div>
                   </div>
@@ -1055,7 +1116,7 @@ export function EnhancedWardrobe({ wardrobe, setWardrobe, wardrobes, setWardrobe
                   <div>
                     <h4 className="font-medium mb-2">Tags</h4>
                     <div className="flex flex-wrap gap-1">
-                      {(selectedItem.customTags || []).map((tag, index) => (
+                      {getDisplayTags(selectedItem).map((tag, index) => (
                         <Badge key={index} variant="secondary" className="text-xs">
                           <Tag className="w-3 h-3 mr-1" />
                           {tag}
@@ -1096,6 +1157,16 @@ export function EnhancedWardrobe({ wardrobe, setWardrobe, wardrobes, setWardrobe
                   </div>
                   
                   <div className="flex gap-2 pt-4">
+                    {!selectedItem.isOwned && (
+                      <Button 
+                        variant="secondary"
+                        className="flex-1"
+                        onClick={() => onAddToCart(selectedItem)}
+                      >
+                        <ShoppingBag className="w-4 h-4 mr-2" />
+                        Add to Cart
+                      </Button>
+                    )}
                     <Button 
                       className="flex-1"
                       onClick={() => toggleFavorite(selectedItem.id)}

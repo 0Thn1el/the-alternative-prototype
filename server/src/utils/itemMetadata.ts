@@ -27,8 +27,55 @@ type EnrichedItemMetadata = SustainabilityMetrics & {
 const GENERIC_TOKENS = new Set([
   'img', 'images', 'image', 'fashion', 'womens', 'women', 'mens', 'men', 'ladies', 'lady',
   'catalog', 'lookbook', 'deepfashion', 'original', 'photo', 'product', 'item', 'full', 'front',
-  'back', 'side', 'view', 'id', 'jpg', 'jpeg', 'png', 'webp', 'look', 'studio', 'abstract'
+  'back', 'side', 'view', 'id', 'jpg', 'jpeg', 'png', 'webp', 'look', 'studio', 'abstract',
+  'above', 'average'
 ]);
+
+const BLOCKED_TAGS = new Set(['the', 'statement', 'neutral']);
+
+const TAG_SPELLING_CORRECTIONS: Record<string, string> = {
+  casul: 'casual',
+  casuale: 'casual',
+  desginer: 'designer',
+  desinger: 'designer',
+  forml: 'formal',
+  formaly: 'formal',
+  jacktes: 'jackets',
+  jakets: 'jackets',
+  jaket: 'jackets',
+  streatwear: 'streetwear',
+  'street ware': 'streetwear',
+  vintge: 'vintage',
+  vintange: 'vintage',
+  organik: 'organic',
+  recyled: 'recycled',
+  recylced: 'recycled',
+  layred: 'layered',
+  layerd: 'layered',
+  polised: 'polished',
+  polishd: 'polished',
+  'work ware': 'workwear',
+  wrokwear: 'workwear',
+  jersy: 'jersey',
+  jersie: 'jersey',
+  linnen: 'linen',
+  offduty: 'off duty',
+  'off duity': 'off duty',
+  'off dutty': 'off duty',
+  'nightout': 'night out',
+  'nite out': 'night out',
+};
+
+const CATEGORY_SYNONYMS: Record<string, string[]> = {
+  top: ['top', 'tee', 'tshirt', 't-shirt', 'shirt', 'blouse', 'tank'],
+  bottom: ['bottom', 'pant', 'pants', 'trouser', 'trousers', 'jean', 'jeans', 'short', 'shorts', 'skirt'],
+  dress: ['dress', 'gown'],
+  outerwear: ['outerwear', 'jacket', 'coat', 'blazer', 'hoodie', 'sweater', 'cardigan'],
+  shoes: ['shoe', 'shoes', 'boot', 'boots', 'sneaker', 'sneakers', 'heel', 'heels', 'loafer', 'loafers'],
+  essentials: ['essential', 'essentials'],
+};
+
+const NON_DESCRIPTIVE_CATEGORIES = new Set(['essentials', 'unknown']);
 
 const COLOR_KEYWORDS = [
   'black', 'white', 'gray', 'grey', 'navy', 'blue', 'red', 'green', 'yellow', 'orange', 'pink',
@@ -186,18 +233,33 @@ export function buildStoreItemName(category: string, sourcePath?: string, fallba
     .reverse()
     .find((segment) => /[a-z]/.test(segment) && !segment.includes('img'));
 
-  const descriptor = descriptiveSegment
+  const descriptorTokens = descriptiveSegment
     ? descriptiveSegment
         .replace(/[_-]+/g, ' ')
         .split(/\s+/)
         .filter((token) => token.length > 2 && !GENERIC_TOKENS.has(token) && !/^\d+$/.test(token))
         .slice(0, 4)
-        .map((token) => toTitleCase(token))
-        .join(' ')
     : '';
 
-  if (descriptor) {
+  const descriptor = descriptorTokens
+    ? descriptorTokens.map((token) => toTitleCase(token)).join(' ')
+    : '';
+
+  const normalizedCategory = category.trim().toLowerCase();
+  const descriptorAlreadyCoversCategory = descriptorTokens
+    ? descriptorTokens.some((token) => matchesCategoryToken(token, normalizedCategory))
+    : false;
+
+  if (descriptor && NON_DESCRIPTIVE_CATEGORIES.has(normalizedCategory)) {
+    return descriptor.slice(0, 120);
+  }
+
+  if (descriptor && !descriptorAlreadyCoversCategory) {
     return `${descriptor} ${toTitleCase(category)}`.trim().slice(0, 120);
+  }
+
+  if (descriptor) {
+    return descriptor.slice(0, 120);
   }
 
   if (fallbackName && !/img[_-]?\d+/i.test(fallbackName)) {
@@ -370,13 +432,12 @@ function buildTags(
   if (tokens.some((token) => ['black', 'white', 'gray', 'grey', 'navy', 'beige', 'olive', 'brown'].includes(token))) {
     candidateTags.add('Core');
   }
-  if (normalizedCategory.toLowerCase().includes('dress') || normalizedCategory.toLowerCase().includes('outerwear')) {
-    candidateTags.add('Statement');
-  }
-
   return Array.from(candidateTags)
     .map((tag) => formatTagLabel(tag.trim()))
-    .filter((tag) => tag.length > 2 && !GENERIC_TOKENS.has(tag.toLowerCase()) && !/^img\d*$/i.test(tag))
+    .filter((tag) => {
+      const normalizedTag = tag.toLowerCase().replace(/\s+/g, ' ').trim();
+      return tag.length > 2 && !GENERIC_TOKENS.has(normalizedTag) && !BLOCKED_TAGS.has(normalizedTag) && !/^img\d*$/i.test(tag);
+    })
     .slice(0, 5);
 }
 
@@ -389,8 +450,10 @@ function buildDescription(input: {
   occasions: string[];
   tags: string[];
 }): string {
+  const article = /^[aeiou]/i.test(input.category.trim()) ? 'an' : 'a';
+  const normalizedName = input.name.trim();
   const parts = [
-    `${input.name} is a ${input.color ? `${input.color.toLowerCase()} ` : ''}${input.category.toLowerCase()}`,
+    `${normalizedName} is ${article} ${input.color ? `${input.color.toLowerCase()} ` : ''}${input.category.toLowerCase()}`,
     input.material ? `crafted with ${input.material.toLowerCase()}` : undefined,
     input.occasions.length > 0 ? `suited for ${input.occasions.join(' and ')} wear` : undefined,
     input.seasonality.length > 0 ? `best for ${input.seasonality.join(' and ')}` : undefined,
@@ -409,7 +472,8 @@ function normalizeCategoryTag(category: string): string {
 }
 
 function formatTagLabel(value: string): string {
-  const normalized = value.replace(/[-_]+/g, ' ').trim().toLowerCase();
+  const base = value.replace(/[-_]+/g, ' ').trim().toLowerCase();
+  const normalized = TAG_SPELLING_CORRECTIONS[base] || base;
   if (TRENDY_TAG_LABELS[normalized]) {
     return TRENDY_TAG_LABELS[normalized];
   }
@@ -425,6 +489,16 @@ function formatTagLabel(value: string): string {
     .slice(0, 2)
     .map((token) => toTitleCase(token))
     .join(' ');
+}
+
+function matchesCategoryToken(token: string, category: string): boolean {
+  const normalizedToken = token.trim().toLowerCase();
+  const normalizedCategory = category.trim().toLowerCase();
+
+  if (!normalizedToken || !normalizedCategory) return false;
+  if (normalizedToken === normalizedCategory) return true;
+
+  return (CATEGORY_SYNONYMS[normalizedCategory] ?? []).includes(normalizedToken);
 }
 
 function inferBrandEthics(brand?: string): number {

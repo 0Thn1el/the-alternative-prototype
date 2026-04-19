@@ -34,12 +34,7 @@ export function Sidebar({ currentPage, setCurrentPage, cartCount }: SidebarProps
   const SidebarContent = () => (
     <div className="flex h-full flex-col">
       {/* Logo Section */}
-      <motion.div 
-        className="flex items-center gap-3 px-6 py-8 border-b border-sidebar-border/50"
-        initial={{ opacity: 0, x: -20 }}
-        animate={{ opacity: 1, x: 0 }}
-        transition={{ duration: 0.3 }}
-      >
+      <div className="flex items-center gap-3 px-6 py-8 border-b border-sidebar-border/50">
         <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
           <Button
             variant="ghost"
@@ -52,21 +47,18 @@ export function Sidebar({ currentPage, setCurrentPage, cartCount }: SidebarProps
             </div>
           </Button>
         </motion.div>
-      </motion.div>
+      </div>
 
       {/* Navigation Links */}
       <nav className="flex-1 px-3 py-6">
         <div className="space-y-1.5">
-          {navItems.map((item, index) => {
+          {navItems.map((item) => {
             const Icon = item.icon;
             const isActive = currentPage === item.id;
             
             return (
               <motion.div
                 key={item.id}
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ duration: 0.3, delay: index * 0.05 }}
                 whileHover={{ x: 6 }}
                 whileTap={{ scale: 0.98 }}
               >
@@ -75,10 +67,7 @@ export function Sidebar({ currentPage, setCurrentPage, cartCount }: SidebarProps
                   onClick={() => handleNavigation(item.id)}
                   className="w-full justify-start gap-4 text-left transition-all duration-200 h-12 px-4 rounded-xl"
                 >
-                  <motion.div
-                    animate={isActive ? { rotate: [0, -10, 10, -10, 0] } : {}}
-                    transition={{ duration: 0.5 }}
-                  >
+                  <motion.div whileTap={{ scale: 0.92 }}>
                     <Icon className="w-5 h-5" />
                   </motion.div>
                   <span className="text-[15px]">{item.label}</span>
@@ -90,12 +79,7 @@ export function Sidebar({ currentPage, setCurrentPage, cartCount }: SidebarProps
       </nav>
 
       {/* User Actions */}
-      <motion.div 
-        className="px-3 py-6 border-t border-sidebar-border/50 space-y-1.5 bg-muted/30"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3, delay: 0.3 }}
-      >
+      <div className="px-3 py-6 border-t border-sidebar-border/50 space-y-1.5 bg-muted/30">
         <motion.div whileHover={{ x: 6 }} whileTap={{ scale: 0.98 }}>
           <Button
             variant={currentPage === 'cart' ? "default" : "ghost"}
@@ -129,12 +113,7 @@ export function Sidebar({ currentPage, setCurrentPage, cartCount }: SidebarProps
           </Button>
           
           {isAccountExpanded && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              className="ml-4 mt-1 space-y-1"
-            >
+            <div className="ml-4 mt-1 space-y-1">
               <Button
                 variant={currentPage === 'profile' ? "default" : "ghost"}
                 onClick={() => handleNavigation('profile')}
@@ -151,7 +130,7 @@ export function Sidebar({ currentPage, setCurrentPage, cartCount }: SidebarProps
                 <LogOut className="w-4 h-4" />
                 Logout
               </Button>
-            </motion.div>
+            </div>
           )}
         </div>
 
@@ -161,16 +140,13 @@ export function Sidebar({ currentPage, setCurrentPage, cartCount }: SidebarProps
             onClick={() => handleNavigation('settings')}
             className="w-full justify-start gap-4 transition-all duration-200 h-12 px-4 rounded-xl"
           >
-            <motion.div
-              animate={{ rotate: currentPage === 'settings' ? 180 : 0 }}
-              transition={{ duration: 0.3 }}
-            >
+            <motion.div whileTap={{ rotate: 90 }} transition={{ duration: 0.15 }}>
               <SettingsIcon className="w-5 h-5" />
             </motion.div>
             <span className="text-[15px]">Settings</span>
           </Button>
         </motion.div>
-      </motion.div>
+      </div>
     </div>
   );
 

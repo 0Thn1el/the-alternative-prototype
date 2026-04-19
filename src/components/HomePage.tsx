@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
@@ -16,6 +16,7 @@ export function HomePage({ wardrobe, setWardrobe, onAddToCart, onViewSimilar }: 
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [priceFilter, setPriceFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("featured");
   const [styleFilter, setStyleFilter] = useState("all");
   const [sustainabilityFilter, setSustainabilityFilter] = useState("all");
   const [brandFilter, setBrandFilter] = useState("all");
@@ -305,29 +306,49 @@ export function HomePage({ wardrobe, setWardrobe, onAddToCart, onViewSimilar }: 
     brand: item.brand,
   });
 
-  const filteredItems = saleItems.filter(item => {
-    const sustainabilityScore = getItemSustainabilityScore(item);
+  const filteredItems = useMemo(() => {
+    const items = saleItems.filter(item => {
+      const sustainabilityScore = getItemSustainabilityScore(item);
 
-    if (searchQuery && !item.name.toLowerCase().includes(searchQuery.toLowerCase()) && 
-        !item.brand.toLowerCase().includes(searchQuery.toLowerCase())) {
-      return false;
+      if (searchQuery && !item.name.toLowerCase().includes(searchQuery.toLowerCase()) && 
+          !item.brand.toLowerCase().includes(searchQuery.toLowerCase())) {
+        return false;
+      }
+      if (categoryFilter !== "all" && item.category !== categoryFilter) return false;
+      if (styleFilter !== "all" && item.style !== styleFilter) return false;
+      if (brandFilter !== "all" && item.brand !== brandFilter) return false;
+      if (sustainabilityFilter !== "all") {
+        if (sustainabilityFilter === "organic" && !item.sustainable.organic) return false;
+        if (sustainabilityFilter === "recycled" && !item.sustainable.recycled) return false;
+        if (sustainabilityFilter === "local" && !item.sustainable.local) return false;
+        if (sustainabilityFilter === "high-score" && sustainabilityScore < 75) return false;
+      }
+      if (priceFilter !== "all") {
+        const maxPrice = priceFilter === "under50" ? 50 : priceFilter === "50to100" ? 100 : priceFilter === "100to200" ? 200 : Infinity;
+        const minPrice = priceFilter === "50to100" ? 50 : priceFilter === "100to200" ? 100 : priceFilter === "over200" ? 200 : 0;
+        if (item.price < minPrice || item.price > maxPrice) return false;
+      }
+      return true;
+    });
+
+    if (sortBy === 'price-low-high') {
+      return [...items].sort((left, right) => left.price - right.price);
     }
-    if (categoryFilter !== "all" && item.category !== categoryFilter) return false;
-    if (styleFilter !== "all" && item.style !== styleFilter) return false;
-    if (brandFilter !== "all" && item.brand !== brandFilter) return false;
-    if (sustainabilityFilter !== "all") {
-      if (sustainabilityFilter === "organic" && !item.sustainable.organic) return false;
-      if (sustainabilityFilter === "recycled" && !item.sustainable.recycled) return false;
-      if (sustainabilityFilter === "local" && !item.sustainable.local) return false;
-      if (sustainabilityFilter === "high-score" && sustainabilityScore < 75) return false;
+
+    if (sortBy === 'price-high-low') {
+      return [...items].sort((left, right) => right.price - left.price);
     }
-    if (priceFilter !== "all") {
-      const maxPrice = priceFilter === "under50" ? 50 : priceFilter === "50to100" ? 100 : priceFilter === "100to200" ? 200 : Infinity;
-      const minPrice = priceFilter === "50to100" ? 50 : priceFilter === "100to200" ? 100 : priceFilter === "over200" ? 200 : 0;
-      if (item.price < minPrice || item.price > maxPrice) return false;
+
+    if (sortBy === 'discount-low-high') {
+      return [...items].sort((left, right) => left.discount - right.discount);
     }
-    return true;
-  });
+
+    if (sortBy === 'discount-high-low') {
+      return [...items].sort((left, right) => right.discount - left.discount);
+    }
+
+    return items;
+  }, [brandFilter, categoryFilter, priceFilter, saleItems, searchQuery, sortBy, styleFilter, sustainabilityFilter]);
 
   const getSustainabilityIcons = (sustainable) => {
     const icons = [];
@@ -515,6 +536,19 @@ export function HomePage({ wardrobe, setWardrobe, onAddToCart, onViewSimilar }: 
                   <SelectItem value="50to100">$50 - $100</SelectItem>
                   <SelectItem value="100to200">$100 - $200</SelectItem>
                   <SelectItem value="over200">Over $200</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Select value={sortBy} onValueChange={setSortBy}>
+                <SelectTrigger className="transition-all duration-200 hover:border-primary/50">
+                  <SelectValue placeholder="Sort By" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="featured">Sort By</SelectItem>
+                  <SelectItem value="price-low-high">Price: Low to High</SelectItem>
+                  <SelectItem value="price-high-low">Price: High to Low</SelectItem>
+                  <SelectItem value="discount-low-high">Discount: Low to High</SelectItem>
+                  <SelectItem value="discount-high-low">Discount: High to Low</SelectItem>
                 </SelectContent>
               </Select>
 
